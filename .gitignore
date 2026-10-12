@@ -1,0 +1,10 @@
+.DS_Store
+.idea/
+*.local
+*.log
+*.zip
+dist
+extension/dist
+extension/manifest.json
+node_modules
+.eslintcache
