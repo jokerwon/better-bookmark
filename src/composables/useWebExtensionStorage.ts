@@ -10,7 +10,6 @@ import type {
 import type { MaybeRefOrGetter, RemovableRef } from '@vueuse/shared'
 import type { Ref } from 'vue-demi'
 import type { Storage } from 'webextension-polyfill'
-
 export type WebExtensionStorageOptions<T> = UseStorageAsyncOptions<T>
 
 // https://github.com/vueuse/vueuse/blob/658444bf9f8b96118dbd06eba411bb6639e24e88/packages/core/useStorage/guess.ts
@@ -46,7 +45,6 @@ const storageInterface: StorageLikeAsync = {
 
   async getItem(key: string) {
     const storedData = await storage.local.get(key)
-
     return storedData[key] as string
   },
 }
