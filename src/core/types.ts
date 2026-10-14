@@ -22,6 +22,7 @@ export interface BookmarkTree {
   /** 浏览器实时读取的范围指纹，用于执行前与预览比对。 */
   liveFingerprint: (rootId: string) => Promise<Fingerprint>
   createFolder: (parentId: string, title: string) => Promise<BookmarkView>
+  createBookmark: (parentId: string, title: string, url: string) => Promise<BookmarkView>
   move: (id: string, parentId: string, index?: number) => Promise<void>
   renameFolder: (id: string, title: string) => Promise<void>
   remove: (id: string) => Promise<void>

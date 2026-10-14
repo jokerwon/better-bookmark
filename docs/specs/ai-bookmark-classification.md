@@ -63,6 +63,7 @@
 48. As a browser user, I want classification and recovery mutually exclusive across extension instances.
 49. As a browser user, I want a Chinese MVP interface, so that the first release stays focused.
 50. As a browser user, I want a 200-bookmark real-sample quality check and a 5,000-bookmark scale check, so that usefulness and capacity are both measured.
+51. As a browser user, I want to export my bookmark tree to a file and import it back, so that I can recover from accidental loss or a bad reorganization.
 
 ## Implementation Decisions
 
@@ -104,6 +105,12 @@
 - Only one classification or recovery operation may run across the extension. Browser restart does not resume model generation; incomplete movement leaves a recoverable state for explicit action.
 - Completion reports actual changes, unchanged/pending/unclassifiable counts, target folders, and undo status. Do not show raw model responses or exact cost estimates.
 
+### Backup and import
+
+- Backup exports the two supported roots with full nesting, verbatim URLs, and empty folders; the file carries no browser node IDs and no classification scheme. Export is a page-initiated file download and adds no permission. Export reads each root as one subtree read, so a read failure fails the export instead of producing a silently incomplete file, and a large collection does not fan out unbounded bookmark-API calls.
+- Import rejects an oversized file before reading it, and validates the entire file before writing: unknown format, unsupported version, malformed nodes, over-limit node count, depth, title or URL length, or a root that is not a folder are rejected without any mutation. A valid file is summarized as folder and bookmark counts, how many bookmarks use a non-HTTP(S) protocol, and the folder each backup root will land in; it needs explicit confirmation before writing.
+- Import only creates nodes, restoring URLs verbatim — the backup must be able to reproduce the user's own bookmarks, including bookmarklets and local-file links, which classification already leaves untouched. Each backup root is written into the live root with the same title, falling back to a user-selected folder shown in the summary, appended after that folder's existing contents. No existing bookmark is deleted, renamed, or overwritten; a failing node is reported as skipped — including its descendants when a folder cannot be created — and does not stop the remaining nodes.
+
 ## Testing Decisions
 
 - Use one end-to-end application-level seam. Replace only the browser bookmarks API with an in-memory tree adapter and the model API with a deterministic model-client adapter. Exercise the same workflow used by the side panel.
@@ -116,6 +123,7 @@
 - Cover folder-creation failure, move failure, recovery success/conflicts, browser restart with incomplete recovery, and preservation of existing folders.
 - Cover undo success, original order restoration, whole-undo disabling on related change, retained disabled records, empty-created-folder removal, no-op snapshot preservation, and configuration changes not affecting undo.
 - Cover URL sanitization, no notes transmission, untrusted-data framing, masked keys, bookmark-free connection test, origin gating, privacy acknowledgement, no-sensitive-logging behavior, and local-data clearing without bookmark deletion.
+- Cover backup round-trip fidelity (nesting, order, empty folders, verbatim URLs), append-only import, the fallback root, per-node failure reporting, and rejection of malformed files before any mutation.
 - The repository has no existing product or test suite, so there is no prior testing pattern to preserve. Establish one deterministic end-to-end harness at the agreed seam.
 - Verify the real Chrome/Edge extension surface, the deterministic harness, the 200-bookmark quality sample, and the 5,000-bookmark scale check.
 
@@ -126,7 +134,7 @@
 - Accounts, developer backend, server storage, cloud sync, or cross-device indexes.
 - Firefox, Safari, and mobile-device bookmark processing.
 - More than one folder level, drag-and-drop tree editing, automatic deletion/merge/rename of existing folders, or destructive cleanup.
-- Bookmark copying or deduplication.
+- Bookmark deduplication or automatic merge, and any restore that deletes, renames, or overwrites existing nodes.
 - Local-rule fallback when the model is unavailable.
 - Provider-specific adapters beyond OpenAI-compatible requests.
 - Full history, multiple undo snapshots, forced undo, or partial undo after related-node conflict.
@@ -143,6 +151,7 @@
 - A real sample of at least 200 multi-topic bookmarks achieves at least 80% acceptable classification without manual correction; pending and cancelled items do not count.
 - A 5,000-bookmark collection completes through bounded batch processing.
 - The extension does not operate a developer backend and does not log secrets or complete model payloads.
+- A backup file round-trips the supported roots, and a malformed or unrelated file never mutates bookmarks.
 
 ## Further Notes
 

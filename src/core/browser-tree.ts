@@ -32,8 +32,8 @@ export function createBrowserTree(api: ExtensionApi = browserApi): BookmarkTree 
   return {
     async roots() {
       const tree = await api.bookmarks.getTree()
-      // 只支持桌面书签栏与其他书签，移动设备书签不参与整理。
-      return (tree[0]?.children ?? []).filter((root: Bookmarks.BookmarkTreeNode) => !root.id.startsWith('mobile')).map(toView)
+      // Chrome/Edge 的树根固定是书签栏与其他书签，移动设备书签排在其后，不参与整理与备份。
+      return (tree[0]?.children ?? []).slice(0, 2).map(toView)
     },
     async children(parentId) {
       return (await childrenOf(parentId)).map(toView)
@@ -68,6 +68,9 @@ export function createBrowserTree(api: ExtensionApi = browserApi): BookmarkTree 
     },
     async createFolder(parentId, title) {
       return toView(await api.bookmarks.create({ parentId, title }))
+    },
+    async createBookmark(parentId, title, url) {
+      return toView(await api.bookmarks.create({ parentId, title, url }))
     },
     async move(id, parentId, index) {
       await api.bookmarks.move(id, typeof index === 'number' ? { parentId, index } : { parentId })

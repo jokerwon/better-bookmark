@@ -57,6 +57,10 @@ export class MemoryTree {
         const id = this.addFolder(parentId, title)
         return { ...this.nodes.get(id)! }
       },
+      createBookmark: async (parentId, title, url) => {
+        const id = this.addBookmark(parentId, title, url)
+        return { ...this.nodes.get(id)! }
+      },
       move: async (id, parentId, index) => {
         const node = this.nodes.get(id)
         if (!node)

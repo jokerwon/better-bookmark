@@ -3,11 +3,13 @@ import { computed, onMounted, onUnmounted, reactive, ref, shallowRef } from 'vue
 import { OperationError, createOrchestrator } from '~/core/classifier'
 import { browserApi } from '~/core/browser-api'
 import { createBrowserTree } from '~/core/browser-tree'
+import { buildBackup, importBackup, parseBackup } from '~/core/backup'
 import { resolveConfig } from '~/core/config'
 import { CONNECTION_TEST_MESSAGES, ModelError, createModelClient } from '~/core/model'
 import { ensureHostPermission } from '~/core/permissions'
 import { deleteCategory, reassign, renameCategory, rowsByCategory } from '~/core/plan'
 import { useWebExtensionStorage } from '~/composables/useWebExtensionStorage'
+import type { BackupFile, BackupNode } from '~/core/backup'
 import type { BookmarkView, OperationResult, Preview, Progress, RecoveryState, UndoRecord, UndoStatus } from '~/core/types'
 
 const browserTree = createBrowserTree()
@@ -15,6 +17,8 @@ const browserTree = createBrowserTree()
 const state = reactive({
   roots: [] as BookmarkView[],
   rootId: '',
+  /** 导入时备份根标题在当前浏览器找不到同名根，就落到这个文件夹。 */
+  fallbackRootId: '',
   requirement: '',
   showingKey: false,
   testState: '' as '' | 'ok' | 'fail',
@@ -34,6 +38,8 @@ const config = useWebExtensionStorage('config', { apiKey: '', baseUrl: '', model
 const consent = useWebExtensionStorage('consent', { originKey: '', acceptedAt: 0 })
 const undoRecord = useWebExtensionStorage<UndoRecord | null>('undo', null)
 const pendingRecovery = useWebExtensionStorage<RecoveryState | null>('recovery', null)
+/** 待确认的备份文件；确认前不写入任何书签。 */
+const pendingImport = ref<{ name: string, data: BackupFile, folders: number, bookmarks: number, other: number } | null>(null)
 
 const orchestrator = createOrchestrator(browserTree, {
   onProgress: (progress) => { state.progress = progress },
@@ -59,10 +65,15 @@ const groups = computed(() => {
     }))
     .filter(group => group.rows.length > 0)
 })
+/** 备份里有当前浏览器不存在的根标题时，需要用户指定落到哪个文件夹。 */
+const unmatchedRoots = computed(() => pendingImport.value
+  ? pendingImport.value.data.roots.filter(root => !state.roots.some(live => live.title === root.title))
+  : [])
 
 onMounted(async () => {
   state.roots = await browserTree.roots()
   state.rootId = state.roots.find(root => root.id.startsWith('1'))?.id ?? state.roots[0]?.id ?? ''
+  state.fallbackRootId = state.rootId
   await refreshUndo()
 })
 
@@ -274,6 +285,107 @@ function clearLocalData() {
   state.message = '已清除本地配置、隐私确认与撤销记录；浏览器书签未被改动'
   void refreshUndo()
 }
+
+/** 导出书签栏与其他书签的完整结构；文件里不含浏览器节点 ID。 */
+async function exportBackup() {
+  state.error = ''
+  state.message = ''
+  state.busy = true
+  try {
+    const data = await buildBackup(browserTree)
+    const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }))
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `better-bookmark-backup-${data.exportedAt.slice(0, 10)}.json`
+    link.click()
+    // 等下载开始后再释放，避免下载被取消。
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+    state.message = `已导出 ${data.roots.length} 个根目录的备份`
+  }
+  catch (error) {
+    state.error = describe(error)
+  }
+  finally {
+    state.busy = false
+  }
+}
+
+/** 统计将要创建的节点与协议外书签：根目录按标题匹配现有根，不会新建。 */
+function countNodes(nodes: BackupNode[], counts = { folders: 0, bookmarks: 0, other: 0 }): { folders: number, bookmarks: number, other: number } {
+  for (const node of nodes) {
+    if (node.url !== undefined) {
+      counts.bookmarks += 1
+      if (!/^https?:\/\//i.test(node.url))
+        counts.other += 1
+    }
+    else {
+      counts.folders += 1
+      countNodes(node.children ?? [], counts)
+    }
+  }
+  return counts
+}
+
+/** 备份根标题 → 预计落地文件夹标题；同名根缺失时落到导入目标。 */
+function importTargets(roots: BackupNode[]): string {
+  return roots
+    .map((root) => {
+      const target = state.roots.find(live => live.title === root.title) ?? state.roots.find(live => live.id === state.fallbackRootId)
+      return `${root.title}→${target?.title ?? '未选择文件夹'}`
+    })
+    .join('、')
+}
+
+/** 选择备份文件只做校验与统计，确认后才写入。 */
+async function pickBackup(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  // 允许再次选择同一个文件。
+  input.value = ''
+  if (state.busy || !file)
+    return
+  state.error = ''
+  state.message = ''
+  pendingImport.value = null
+  // 每次选文件都回到当前整理范围，用户仍可在摘要里改。
+  state.fallbackRootId = state.rootId
+  // 先按体积挡掉畸形文件，避免整份读进侧边栏内存；结构校验交给 parseBackup。
+  if (file.size > 16 * 1024 * 1024) {
+    state.error = '备份文件超过 16 MB，无法导入'
+    return
+  }
+  try {
+    const parsed = parseBackup(await file.text())
+    if (!parsed.ok) {
+      state.error = parsed.error
+      return
+    }
+    pendingImport.value = { name: file.name, data: parsed.value, ...countNodes(parsed.value.roots.flatMap(root => root.children ?? [])) }
+  }
+  catch (error) {
+    state.error = describe(error)
+  }
+}
+
+async function confirmImport() {
+  if (!pendingImport.value)
+    return
+  state.busy = true
+  state.error = ''
+  state.message = ''
+  try {
+    const report = await importBackup(pendingImport.value.data, browserTree, state.fallbackRootId)
+    state.message = `已导入 ${report.folders} 个文件夹、${report.bookmarks} 个书签到 ${report.roots.join('、')}${report.skipped ? `；${report.skipped} 个节点未写入` : ''}`
+    pendingImport.value = null
+    await refreshUndo()
+  }
+  catch (error) {
+    state.error = describe(error)
+  }
+  finally {
+    state.busy = false
+  }
+}
 </script>
 
 <template>
@@ -427,6 +539,36 @@ function clearLocalData() {
       <button v-if="pendingRecovery" class="recovery-link" type="button" :disabled="state.busy" @click="runRecovery">恢复未完成的移动（{{ pendingRecovery.completed.length }} 个）</button>
       <button class="recovery-link muted-link" type="button" @click="clearLocalData">清除本地配置与撤销记录</button>
     </section>
+
+    <section class="backup-panel surface-panel" aria-labelledby="backup-title">
+      <div class="panel-heading">
+        <div><p class="mono-eyebrow">BACKUP / 04</p><h3 id="backup-title">备份与导入</h3></div>
+        <span class="panel-index">JSON</span>
+      </div>
+      <p class="field-help">导出「书签栏」与「其他书签」的完整结构。导入只创建节点，追加在同名根目录末尾，不删除现有书签。</p>
+      <div class="backup-actions">
+        <button class="button-secondary" type="button" :disabled="state.busy" @click="exportBackup">导出备份</button>
+        <label class="button-secondary file-label" :class="{ 'is-disabled': state.busy }">
+          选择备份文件
+          <input type="file" accept=".json,application/json" hidden @change="pickBackup">
+        </label>
+      </div>
+      <div v-if="pendingImport" class="import-summary">
+        <p><strong>{{ pendingImport.name }}</strong>：{{ pendingImport.folders }} 个文件夹、{{ pendingImport.bookmarks }} 个书签</p>
+        <p v-if="pendingImport.other" class="field-help">其中 {{ pendingImport.other }} 个书签不是 HTTP(S)（例如书签小工具），会原样导入。</p>
+        <p class="field-help">将写入：{{ importTargets(pendingImport.data.roots) }}</p>
+        <label v-if="unmatchedRoots.length" class="field-row">
+          <span class="field-label">备份中的「{{ unmatchedRoots.map(root => root.title).join('」「') }}」在当前浏览器不存在，改为写入</span>
+          <select v-model="state.fallbackRootId" class="text-control">
+            <option v-for="root in state.roots" :key="root.id" :value="root.id">{{ root.title || root.id }}</option>
+          </select>
+        </label>
+        <div class="backup-actions">
+          <button class="button-secondary" type="button" :disabled="state.busy" @click="confirmImport">确认导入</button>
+          <button class="text-action" type="button" :disabled="state.busy" @click="pendingImport = null">取消</button>
+        </div>
+      </div>
+    </section>
   </main>
 </template>
 
@@ -472,7 +614,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .surface-panel { border: 1px solid var(--hairline); background: var(--surface); }
 .setup-panel, .preview-panel { margin-top: 16px; padding: 20px; }
 .panel-heading { justify-content: space-between; align-items: flex-start; margin-bottom: 22px; }
-.panel-heading h3, .recovery-panel h3 { margin: 5px 0 0; font-size: 20px; font-weight: 600; letter-spacing: -.5px; }
+.panel-heading h3, .recovery-panel h3, .backup-panel h3 { margin: 5px 0 0; font-size: 20px; font-weight: 600; letter-spacing: -.5px; }
 .mono-eyebrow, .panel-index, .preview-total { color: var(--mute); }
 .panel-index, .preview-total { font-family: "Geist Mono", ui-monospace, monospace; font-size: 11px; }
 .field-row { display: block; margin-top: 18px; }
@@ -544,6 +686,13 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .recovery-reasons { margin: 0; padding-left: 17px; color: var(--body); font-size: 12px; }
 .recovery-link { text-align: left; }
 .muted-link { color: var(--mute); }
+.backup-panel { margin-top: 16px; padding: 18px 20px; }
+.backup-actions { display: flex; align-items: center; gap: 8px; margin-top: 14px; }
+.file-label { display: inline-flex; align-items: center; cursor: pointer; }
+.file-label.is-disabled { pointer-events: none; opacity: .48; }
+.import-summary { margin-top: 14px; padding: 12px 14px; border: 1px solid var(--hairline); background: var(--hairline-soft); }
+.import-summary p { margin: 0; font-size: 13px; }
+.import-summary .backup-actions { margin-top: 10px; }
 @media (min-width: 640px) { .workspace-shell { padding: 22px 24px 48px; } .hero-band { margin: 0 -24px; padding-right: 24px; padding-left: 24px; } }
 @media (max-width: 420px) { .metric-grid span { font-size: 10px; } .metric-grid div { padding-right: 5px; padding-left: 5px; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; } }
