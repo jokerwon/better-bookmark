@@ -7,7 +7,7 @@
 
 ## Solution
 
-构建 Chrome/Edge Manifest V3 浏览器扩展，通过侧边栏让用户选择一个书签根目录，使用用户配置的 OpenAI-compatible API 生成一级分类建议。插件先展示完整预览，用户可以修改分类名称、调整书签归属或取消单项，确认后才创建目录和移动书签。
+构建 Chrome/Edge Manifest V3 浏览器扩展，通过侧边栏让用户选择一个书签根目录，使用用户配置的 OpenAI-compatible API 生成最多三层的分类树建议。插件先展示完整嵌套树预览，用户可以修改分类节点名称、调整书签归属或取消单项，确认后才创建目录和移动书签。
 
 插件直连用户配置的模型服务，不经过开发方服务器。所有移动均可观察、可恢复；最近一次成功整理支持撤销。MVP 只做书签分类，不做自然语言检索。
 
@@ -28,8 +28,8 @@
 13. As a browser user, I want only title, sanitized URL, and relative folder path sent, so that classification has context without unnecessary disclosure.
 14. As a browser user, I want URL credentials, query strings, and fragments removed before transmission, so that tokens and searches are not sent.
 15. As a browser user, I want bookmark fields and custom requirements treated as untrusted data, so that embedded instructions cannot override system constraints.
-16. As a browser user, I want a configurable category limit defaulting to eight and bounded from three through fifteen, so that the result is maintainable.
-17. As a browser user, I want the effective category limit capped by classifiable bookmark count, so that empty categories are not manufactured.
+16. As a browser user, I want one category limit defaulting to eight and bounded from three through fifteen, so that each of the three possible tree levels remains maintainable.
+17. As a browser user, I want each tree level capped by the effective category limit, with the cap reduced for small scopes, so that classification trees do not grow beyond the configured size.
 18. As a browser user, I want to enter natural-language classification requirements, so that I can express naming and grouping preferences.
 19. As a browser user, I want unsupported destructive requirements ignored and explained, so that text input cannot bypass safety boundaries.
 20. As a browser user, I want an empty scope to finish without an API call, so that no cost is incurred when there is nothing to classify.
@@ -44,16 +44,16 @@
 29. As a browser user, I want assignment or explicit pending as the only valid decisions, so that uncertainty remains safe.
 30. As a browser user, I want malformed responses, unknown IDs, duplicate IDs, missing IDs, and invalid category IDs rejected before movement.
 31. As a browser user, I want pending decisions to remain in their original locations.
-32. As a browser user, I want a complete preview grouped by target category, with collapsed groups and incremental display, so that 5,000 bookmarks remain usable.
-33. As a browser user, I want title/URL filtering and counts for total, moving, unchanged, pending, unclassifiable, and target categories.
-34. As a browser user, I want to rename categories, cancel individual bookmarks, batch-reassign selected bookmarks, and delete proposed categories in the preview.
-35. As a browser user, I want invalid names and normalized name conflicts to block confirmation until fixed.
-36. As a browser user, I want deleting a proposed category to make its bookmarks pending and leave them in place.
+32. As a browser user, I want a complete nested-tree preview with collapsed nodes and incremental display, so that 5,000 bookmarks remain usable.
+33. As a browser user, I want title/URL filtering and counts for total, moving, unchanged, pending, unclassifiable, and classification-tree nodes.
+34. As a browser user, I want to rename classification nodes, cancel individual bookmarks, batch-reassign selected bookmarks, and delete proposed classification nodes in the preview.
+35. As a browser user, I want invalid names and normalized sibling-name conflicts to block confirmation until fixed.
+36. As a browser user, I want deleting a proposed classification node to delete its proposed subtree and make its bookmarks pending.
 37. As a browser user, I want external changes to participating bookmarks to invalidate the complete preview and require full regeneration.
 38. As a browser user, I want preview confirmation to be final authorization without a redundant second dialog.
 39. As a browser user, I want new folders created only after confirmation, all verified before movement, and empty folders avoided.
-40. As a browser user, I want existing normalized sibling folders reused without renaming or altering their existing contents.
-41. As a browser user, I want new folders in frozen plan order and moved bookmarks in original traversal order appended after existing target contents.
+40. As a browser user, I want existing normalized sibling folders reused along the complete relative path without renaming or altering their existing contents.
+41. As a browser user, I want new folders in frozen depth-first plan order and moved bookmarks in original traversal order appended after existing target contents.
 42. As a browser user, I want failures to stop subsequent movement, attempt recovery, and report conflicts without overwriting later changes.
 43. As a browser user, I want successful classification to report actual changes, folders, and undo availability.
 44. As a browser user, I want the latest successful operation stored locally for undo after browser restart.
@@ -81,29 +81,30 @@
 - Never log complete model requests, complete model responses, bookmark metadata, or API keys to console or local logs. Convert API errors to user-readable messages without echoing API keys, Authorization headers, request bodies, response bodies, or other secret-bearing values. Diagnostics, if any, use redacted identifiers and aggregate status only.
 - Configuration fields are API Key, Base URL, and model name. Strip trailing slash and append fixed `/chat/completions`; reject Base URLs already containing that path. A real classification requires a successful connection check. The test request contains no bookmark metadata.
 - Transmit only title, sanitized HTTP(S) URL, and path relative to the selected root. Remove URL username, password, query, and hash. Chrome/Edge provide no general bookmark notes field; notes are not part of the contract or schema.
-- Treat titles, URL-derived values, relative paths, and user requirements as untrusted data. They are classification input, never instructions. The model cannot request destructive operations or exceed one-level classification.
+- Treat titles, URL-derived values, relative paths, and user requirements as untrusted data. They are classification input, never instructions. The model cannot request destructive operations or exceed three-level classification.
 
 ### Classification pipeline and model contract
 
-- Pipeline: collect a stable snapshot; create local topic summaries; merge summaries into a global plan; generate extension-owned category IDs; classify batches against the frozen plan; validate all responses; construct preview.
-- Effective category limit is `min(userLimit, classifiableBookmarkCount)`; user limit is 3–15, default 8. No classifiable bookmarks means no model call.
-- Normalize category names by trimming, Unicode normalization, and case-insensitive comparison. Duplicate normalized names in the model plan fail classification. Existing normalized sibling matches are reused while preserving the existing display name and contents.
-- Topic summaries and category names follow the dominant language of the participating bookmark titles; no language is mandated. A user requirement that specifies a naming language takes precedence. Length limits are script-aware: about 12 Chinese characters or 2–3 words (about 24 characters) for names.
-- Invalid model-generated names (empty, too long, or containing path separators) appear in the preview as blocking errors and can be fixed by the user. Malformed structure, unknown/duplicate/missing IDs, or duplicate plan names fail classification. User-edited conflicts also block confirmation.
-- Every requested ID appears exactly once, either `{ bookmark_id, decision: "assign", category_id }` with a valid frozen category ID, or `{ bookmark_id, decision: "pending" }` with no category ID. Invalid responses prevent a complete preview.
+- Pipeline: collect a stable snapshot; create local topic summaries; merge summaries into a global nested tree plan; generate extension-owned classification-node IDs; classify batches against the frozen plan; validate all responses; construct the nested-tree preview.
+- The user configures one category limit, default 8 and bounded from 3 through 15. The effective per-level limit is `min(userLimit, classifiableBookmarkCount)`; the root, second, and third levels are each capped independently by that effective limit. No classifiable bookmarks means no model call.
+- The tree has at most three levels. The model returns nested nodes in plan order; the extension rejects malformed trees, over-depth trees, or any level exceeding its effective limit. It does not truncate, merge, or silently relax the result. A three-level tree can contain at most three times the effective limit in total nodes.
+- Normalize classification-node names by trimming, Unicode normalization, and case-insensitive comparison. Duplicate normalized names are rejected only among siblings; the same name may appear under different parents. Existing normalized sibling matches are reused along the complete relative path while preserving existing display names and contents.
+- Topic summaries and classification-node names follow the dominant language of the participating bookmark titles; no language is mandated. A user requirement that specifies a naming language takes precedence. Length limits are script-aware: about 12 Chinese characters or 2–3 words (about 24 characters) for names.
+- Invalid model-generated names (empty, too long, or containing path separators) appear in the preview as blocking errors and can be fixed by the user. Malformed nested structure, unknown/duplicate/missing IDs, invalid depth or per-level counts, or invalid category-node IDs fail classification. User-edited sibling conflicts also block confirmation.
+- Every requested ID appears exactly once, either `{ bookmark_id, decision: "assign", category_id }` with a valid frozen classification-node ID, or `{ bookmark_id, decision: "pending" }` with no category ID. Invalid responses prevent a complete preview.
 - Use low-randomness settings and stable plan and batch order. Use at most two concurrent requests. Retry network and rate-limit failures twice; stop on other errors. Cancellation discards provisional results and cannot move bookmarks.
 
 ### Preview, execution, recovery, and undo
 
 - The single test seam is the end-to-end application-level classification workflow, replacing only the browser bookmarks API with an in-memory tree adapter and the OpenAI-compatible service with a deterministic model-client adapter. Internal prompt formatting and loop structure are not separate contracts.
-- Preview supports collapsed groups, incremental display, title/URL filtering, cancellation, multi-item reassignment, rename, and category deletion. Deleting a category makes its items pending.
+- Preview displays a collapsible nested classification tree with incremental display, title/URL filtering, cancellation, multi-item reassignment, rename, and classification-node deletion. Filtering preserves matching bookmarks and expands their ancestors. Deleting a node deletes its proposed subtree and makes its items pending. `counts.categories` is the total number of nodes in the classification tree.
 - Before confirmation and immediately before execution, compare the participating snapshot. Any existence, parent ID, title, URL, or selected-range change invalidates the complete preview and requires full regeneration.
-- After final confirmation, create and verify target folders, then move bookmarks in stable original traversal order. Append new items after existing target contents. Do not create empty targets.
+- After final confirmation, resolve or create target folders along each complete relative path, verify all targets, then move bookmarks in stable original traversal order. Append new items after existing target contents. Do not create empty targets.
 - Record for recovery and undo: bookmark node ID, original parent ID, target parent ID, original index, post-operation title, post-operation URL, and IDs of folders created by the operation. Store no notes and no full tree copy.
 - Folder-creation failure stops before movement and removes only newly created empty folders. Move failure stops further movement and attempts recovery. Recovery may restore still-compatible items but never overwrites later changes.
 - A successful operation replaces the previous undo record only when at least one bookmark moved. No-op operations preserve the previous record. Undo checks every related node; any related change disables the entire undo. Compatible undo restores parents and inserts nodes in ascending original-index order, then removes only empty operation-created folders.
 - Only one classification or recovery operation may run across the extension. Browser restart does not resume model generation; incomplete movement leaves a recoverable state for explicit action.
-- Completion reports actual changes, unchanged/pending/unclassifiable counts, target folders, and undo status. Do not show raw model responses or exact cost estimates.
+- Completion reports actual changes, unchanged/pending/unclassifiable counts, target folders, classification-tree node count, and undo status. Do not show raw model responses or exact cost estimates.
 
 ### Backup and import
 
@@ -115,10 +116,10 @@
 
 - Use one end-to-end application-level seam. Replace only the browser bookmarks API with an in-memory tree adapter and the model API with a deterministic model-client adapter. Exercise the same workflow used by the side panel.
 - Good tests assert external behavior: tree contents after confirmation, requests sent or prevented, preview invalidation, recovery/undo availability, and items left in place. Do not test private fields, prompt text, forwarding, mock echoes, or incidental defaults.
-- Cover the happy path, folder reuse, folder and bookmark ordering, pending and unchanged items, and no-empty-folder behavior.
-- Cover empty and small scopes, 3–15 limits, nested folders, duplicate URLs, unsupported URLs, duplicate names, and the 5,000-bookmark path.
-- Cover malformed JSON, unknown/duplicate/missing IDs, invalid category IDs, invalid decisions, and explicit pending; prove no mutation occurs.
-- Cover preview rename, invalid-name blocking, conflicts, category deletion, cancellation, batch reassignment, filtering, and counts.
+- Cover the happy path, folder reuse along nested paths, folder and bookmark ordering, pending and unchanged items, and no-empty-folder behavior.
+- Cover empty and small scopes, 3–15 per-level limits, one-, two-, and three-level trees, nested folders, duplicate URLs, unsupported URLs, duplicate sibling names, and the 5,000-bookmark path.
+- Cover malformed JSON, malformed nested plans, over-depth and over-limit plans, unknown/duplicate/missing IDs, invalid category-node IDs, invalid decisions, and explicit pending; prove no mutation occurs.
+- Cover nested-tree preview rename, invalid-name blocking, sibling conflicts, subtree deletion, cancellation, batch reassignment, filtering with ancestor expansion, and total-node counts.
 - Cover external title/URL/parent/existence/range changes before confirmation and execution; prove stale previews cannot move bookmarks.
 - Cover folder-creation failure, move failure, recovery success/conflicts, browser restart with incomplete recovery, and preservation of existing folders.
 - Cover undo success, original order restoration, whole-undo disabling on related change, retained disabled records, empty-created-folder removal, no-op snapshot preservation, and configuration changes not affecting undo.
@@ -133,7 +134,7 @@
 - Tags, notes, content indexing, page-body/meta fetching, or crawling.
 - Accounts, developer backend, server storage, cloud sync, or cross-device indexes.
 - Firefox, Safari, and mobile-device bookmark processing.
-- More than one folder level, drag-and-drop tree editing, automatic deletion/merge/rename of existing folders, or destructive cleanup.
+- More than three folder levels, drag-and-drop tree editing, arbitrary user-created classification nodes, automatic deletion/merge/rename of existing folders, or destructive cleanup.
 - Bookmark deduplication or automatic merge, and any restore that deletes, renames, or overwrites existing nodes.
 - Local-rule fallback when the model is unavailable.
 - Provider-specific adapters beyond OpenAI-compatible requests.

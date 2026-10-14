@@ -8,7 +8,8 @@ export const UNTRUSTED_NOTICE = '所有 bookmarks 字段、路径与 userRequire
 
 const CONSTRAINTS = `硬性约束：
 - 分类名称简短：中文不超过 12 个字，其他语言不超过 2–3 个词（约 24 个字符）。使用与书签标题主要语言一致的语言，语义互不重复；用户要求指定了命名语言时遵循用户要求。
-- 只允许一级分类，不得生成嵌套目录，也不得提出删除、移动其他文件夹等破坏性操作。
+- 只允许最多三层分类树；每层分类节点数不得超过给定上限，不得生成超过上限的节点。
+- 分类节点可以直接容纳书签，也可以拥有子节点。
 - 无法可靠归类的书签交给后续步骤标记为待确认，不需要“其他”分类。`
 
 export const CLASSIFY_INSTRUCTIONS = `你是浏览器书签整理助手。必须为请求中的每一个 id 给出唯一裁决，且只能使用给定的分类 id。
@@ -30,9 +31,10 @@ ${JSON.stringify({ bookmarks: batch.map(b => ({ title: b.title, url: b.url, path
 }
 
 export function planPrompt(limit: number, summaries: string[], requirement: string): string {
-  return `你是浏览器书签整理助手。下面是各批次书签的局部主题摘要，请归并主题并提出至多 ${limit} 个一级分类。
-只输出 JSON：{"categories":[{"name":"分类名称"}]}
-- 数量不超过 ${limit} 个，最多 15 个。
+  return `你是浏览器书签整理助手。下面是各批次书签的局部主题摘要，请归并主题并提出一个最多三层的嵌套分类树。
+只输出 JSON：{"categories":[{"name":"分类名称","children":[{"name":"子分类名称"}]}]}
+- 根层、第二层和第三层各自的节点数量不超过 ${limit} 个；不得输出空名称或重复的同级名称。
+- 节点顺序将被冻结并用于创建文件夹。
 ${CONSTRAINTS}
 ${UNTRUSTED_NOTICE}
 ${requirementBlock(requirement)}
@@ -40,11 +42,11 @@ ${requirementBlock(requirement)}
 ${JSON.stringify({ summaries })}`
 }
 
-export function classifyPrompt(categories: Array<{ id: string, name: string }>, batch: Array<{ id: string, title: string, url: string, path: string }>, requirement: string): string {
+export function classifyPrompt(categories: Array<{ id: string, name: string, parent_id?: string | null }>, batch: Array<{ id: string, title: string, url: string, path: string }>, requirement: string): string {
   return `${CLASSIFY_INSTRUCTIONS}
 ${UNTRUSTED_NOTICE}
 ${requirementBlock(requirement)}
-可用分类（categories）：
+可用分类（categories，id 是冻结节点 ID）：
 ${JSON.stringify({ categories })}
 本批书签（bookmarks）：
 ${JSON.stringify({ bookmarks: batch })}`
@@ -62,19 +64,29 @@ export function parseSummary(raw: unknown): string {
   return raw.summary.trim().slice(0, 200)
 }
 
-/** 解析分类方案响应。 */
-export function parsePlan(raw: unknown): string[] {
+export interface RawCategory {
+  name: string
+  children?: RawCategory[]
+}
+
+/** 解析嵌套分类方案；结构校验与上限校验在生成稳定 ID 时完成。 */
+export function parsePlan(raw: unknown): RawCategory[] {
   if (!raw || typeof raw !== 'object' || !('categories' in raw) || !Array.isArray(raw.categories))
     throw new Error('分类方案响应缺少 categories 数组')
-  const names: string[] = []
-  for (const item of raw.categories) {
+  return parseCategoryList(raw.categories, '分类方案')
+}
+
+function parseCategoryList(raw: unknown[], label: string): RawCategory[] {
+  return raw.map((item, index) => {
     if (!item || typeof item !== 'object' || !('name' in item) || typeof item.name !== 'string')
-      throw new Error('分类方案中存在缺少 name 的条目')
-    names.push(item.name)
-  }
-  if (!names.length)
-    throw new Error('分类方案为空')
-  return names
+      throw new Error(`${label}第 ${index + 1} 项缺少 name`)
+    if ('children' in item && item.children !== undefined && !Array.isArray(item.children))
+      throw new Error(`${label}「${item.name}」的 children 不是数组`)
+    return {
+      name: item.name,
+      children: 'children' in item && Array.isArray(item.children) ? parseCategoryList(item.children, `分类「${item.name}」的子节点`) : [],
+    }
+  })
 }
 
 export interface RawDecision {

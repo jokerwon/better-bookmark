@@ -45,6 +45,7 @@ describe('分类方案与撤销的边界', () => {
     const memory = new MemoryTree()
     const root = memory.addFolder('root', '书签栏')
     memory.addBookmark(root, 'A', 'https://a.example.com/')
+    memory.addBookmark(root, 'B', 'https://b.example.com/')
     const orchestrator = createOrchestrator(memory.createTree())
     const run = await orchestrator.classify({ rootId: root, categoryLimit: 5, requirement: '' }, new PlanModel(['开发', '生活']))
     // 删除其中一个分类，其书签回到待确认。

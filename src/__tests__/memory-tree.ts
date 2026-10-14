@@ -81,7 +81,10 @@ export class MemoryTree {
           this.nodes.set(id, { ...node, title })
       },
       remove: async (id) => {
+        const descendants = this.flatten(id).map(node => node.id)
         this.detach(id)
+        for (const descendant of descendants)
+          this.nodes.delete(descendant)
         this.nodes.delete(id)
       },
     }

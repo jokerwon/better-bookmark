@@ -22,6 +22,27 @@ export function buildSnapshot(input: {
 
 export type Fingerprint = Array<[string, string, string, string, string]>
 
+/** 按模型顺序深度优先展开分类树。 */
+export function flattenCategories(categories: Category[]): Category[] {
+  const out: Category[] = []
+  const visit = (nodes: Category[]) => {
+    for (const node of nodes) {
+      out.push(node)
+      visit(node.children)
+    }
+  }
+  visit(categories)
+  return out
+}
+
+export function cloneCategories(categories: Category[]): Category[] {
+  return categories.map(category => ({ ...category, children: cloneCategories(category.children) }))
+}
+
+function categoryMap(categories: Category[]): Map<string, Category> {
+  return new Map(flattenCategories(categories).map(category => [category.id, category]))
+}
+
 /** 构造预览：校验裁决完整性并计算统计。 */
 export function buildPreview(input: {
   snapshot: ScopeSnapshot
@@ -29,7 +50,8 @@ export function buildPreview(input: {
   decisions: Decision[]
 }): { ok: true, preview: Preview } | { ok: false, error: string } {
   const { snapshot, categories, decisions } = input
-  const validIds = new Set(categories.map(c => c.id))
+  const flat = flattenCategories(categories)
+  const validIds = new Set(flat.map(c => c.id))
   const byId = new Map<string, Decision>()
 
   for (const decision of decisions) {
@@ -48,20 +70,19 @@ export function buildPreview(input: {
 
   const preview: Preview = {
     rootId: snapshot.rootId,
-    categories: categories.map(category => ({ ...category })),
+    categories: cloneCategories(categories),
     rows: snapshot.bookmarks.map((bookmark) => {
       const decision = byId.get(bookmark.id)!
       return {
         bookmarkId: bookmark.id,
         title: bookmark.title,
-        // 界面只展示脱敏 URL；原始 URL 保留在 row.url 供撤销校验使用。
         url: bookmark.url ?? '',
         displayUrl: sanitizeUrl(bookmark.url ?? '') ?? '',
         categoryId: decision.kind === 'assign' ? decision.categoryId : null,
       }
     }),
     fingerprint: fingerprintOf(snapshot),
-    counts: { total: 0, moving: 0, unchanged: 0, pending: 0, unclassifiable: snapshot.unclassifiable.length, categories: categories.length },
+    counts: { total: 0, moving: 0, unchanged: 0, pending: 0, unclassifiable: snapshot.unclassifiable.length, categories: flat.length },
     blocking: [],
   }
   recount(preview)
@@ -69,14 +90,13 @@ export function buildPreview(input: {
 }
 
 export function recount(preview: Preview): void {
-  const validIds = new Set(preview.categories.map(c => c.id))
-  // 指纹里包含范围内的全部节点（含文件夹），可用父节点 ID 反查其标题。
+  const categories = flattenCategories(preview.categories)
+  const validIds = new Set(categories.map(c => c.id))
   const parentOf = new Map(preview.fingerprint.map(([id, parent]) => [id, parent]))
   const titleById = new Map(preview.fingerprint.map(([id, , title]) => [id, title]))
   const pending = preview.rows.filter(row => !row.categoryId || !validIds.has(row.categoryId)).length
-  // “不变”= 书签已被归到与其原父文件夹同名的分类，执行时不会移动。
   const unchanged = preview.rows.filter((row) => {
-    const category = preview.categories.find(c => c.id === row.categoryId)
+    const category = categories.find(c => c.id === row.categoryId)
     if (!category)
       return false
     const parentTitle = titleById.get(parentOf.get(row.bookmarkId) ?? '') ?? ''
@@ -88,41 +108,44 @@ export function recount(preview: Preview): void {
     unchanged,
     pending,
     unclassifiable: preview.counts.unclassifiable,
-    categories: new Set(preview.rows.map(row => row.categoryId).filter((id): id is string => Boolean(id && validIds.has(id)))).size,
+    categories: categories.length,
   }
 }
 
-/** 阻断确认的问题：非法或重复名称，以及没有任何需要移动的书签。 */
+/** 阻断确认的问题：非法或同级重复名称，以及没有任何需要移动的书签。 */
 export function previewBlocking(preview: Preview): string[] {
   const blocking = [...preview.blocking]
-  const used = new Set<string>()
-  for (const category of preview.categories) {
-    const invalid = validateCategoryName(category.name)
-    if (invalid) {
-      blocking.push(`分类「${category.name || '(空)'}」：${invalid}`)
-      continue
+  const visit = (categories: Category[]) => {
+    const used = new Set<string>()
+    for (const category of categories) {
+      const invalid = validateCategoryName(category.name)
+      if (invalid) {
+        blocking.push(`分类「${category.name || '(空)'}」：${invalid}`)
+      }
+      else {
+        const key = normalizeName(category.name)
+        if (used.has(key))
+          blocking.push(`同级分类名称重复：${category.name}`)
+        used.add(key)
+      }
+      visit(category.children)
     }
-    const key = normalizeName(category.name)
-    if (used.has(key)) {
-      blocking.push(`分类名称重复：${category.name}`)
-      continue
-    }
-    used.add(key)
   }
+  visit(preview.categories)
   if (preview.counts.moving === 0)
     blocking.push('没有需要移动的书签')
   return [...new Set(blocking)]
 }
 
-/** 预览分组：各分类下的书签，以及仍未定归属的“待确认”。 */
+/** 预览分组：按冻结树的深度优先顺序返回各分类及其书签。 */
 export function rowsByCategory(preview: Preview): Array<{ category: Category, rows: PreviewRow[] }> {
-  const groups = preview.categories.map(category => ({
+  const groups = flattenCategories(preview.categories).map(category => ({
     category,
     rows: preview.rows.filter(row => row.categoryId === category.id),
   }))
   const pendingRows = preview.rows.filter(row => !row.categoryId)
   if (pendingRows.length)
-    groups.push({ category: { id: '__pending__', name: '待确认' }, rows: pendingRows })
+    groups.push({ category: { id: '__pending__', name: '待确认', parentId: null, children: [] }, rows: pendingRows })
   return groups
 }
 
@@ -130,7 +153,7 @@ export function rowsByCategory(preview: Preview): Array<{ category: Category, ro
 export function reassign(preview: Preview, bookmarkIds: string[], categoryId: string | null): Preview {
   const next: Preview = {
     ...preview,
-    categories: preview.categories.map(category => ({ ...category })),
+    categories: cloneCategories(preview.categories),
     rows: preview.rows.map(row => bookmarkIds.includes(row.bookmarkId) ? { ...row, categoryId } : { ...row }),
     blocking: [...preview.blocking],
   }
@@ -138,12 +161,20 @@ export function reassign(preview: Preview, bookmarkIds: string[], categoryId: st
   return next
 }
 
-/** 删除一个拟建分类：其书签回到待确认，保留原位置。 */
+/** 删除一个拟建分类及其子树：相关书签回到待确认，保留原位置。 */
 export function deleteCategory(preview: Preview, categoryId: string): Preview {
+  const removed = new Set<string>()
+  const collect = (categories: Category[]): Category[] => categories.flatMap((category) => {
+    if (category.id === categoryId) {
+      flattenCategories([category]).forEach(node => removed.add(node.id))
+      return []
+    }
+    return [{ ...category, children: collect(category.children) }]
+  })
   const next: Preview = {
     ...preview,
-    categories: preview.categories.filter(category => category.id !== categoryId).map(category => ({ ...category })),
-    rows: preview.rows.map(row => row.categoryId === categoryId ? { ...row, categoryId: null } : { ...row }),
+    categories: collect(preview.categories),
+    rows: preview.rows.map(row => removed.has(row.categoryId ?? '') ? { ...row, categoryId: null } : { ...row }),
     blocking: [...preview.blocking],
   }
   recount(next)
@@ -151,19 +182,21 @@ export function deleteCategory(preview: Preview, categoryId: string): Preview {
 }
 
 export function renameCategory(preview: Preview, categoryId: string, name: string): Preview {
-  const next: Preview = {
-    ...preview,
-    categories: preview.categories.map(category => category.id === categoryId ? { ...category, name } : { ...category }),
-    rows: preview.rows.map(row => ({ ...row })),
-    blocking: [...preview.blocking],
-  }
+  const rename = (categories: Category[]): Category[] => categories.map(category => ({
+    ...category,
+    name: category.id === categoryId ? name : category.name,
+    children: rename(category.children),
+  }))
+  const next: Preview = { ...preview, categories: rename(preview.categories), rows: preview.rows.map(row => ({ ...row })), blocking: [...preview.blocking] }
   recount(next)
   return next
 }
-/**
- * 预览与执行共用的指纹：成员身份、位置、标题与 URL。
- * 快照与浏览器实时读取是同一算法，只是 URL 字段的类型不同。
- */
+
+export function categoryById(categories: Category[], id: string): Category | undefined {
+  return categoryMap(categories).get(id)
+}
+
+/** 预览与执行共用的指纹：成员身份、位置、标题与 URL。 */
 export function fingerprintOf(snapshot: ScopeSnapshot): Array<[string, string, string, string, string]>
 export function fingerprintOf(nodes: Bookmarks.BookmarkTreeNode[]): Array<[string, string, string, string, string]>
 export function fingerprintOf(source: ScopeSnapshot | Bookmarks.BookmarkTreeNode[]): Array<[string, string, string, string, string]> {

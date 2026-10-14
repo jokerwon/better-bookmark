@@ -1,13 +1,12 @@
 import type { BookmarkTree, BookmarkView, Category, CreatedFolder, Decision, OperationResult, Preview, Progress, RecoveryState, ScopeSnapshot, UndoRecord, UndoStatus } from './types'
 import type { ModelClient } from './model'
 import { extractJson, withRetries } from './model'
-import { BATCH_SIZE, SUMMARY_BATCH_SIZE, chunk, classifyPrompt, parseDecisions, parsePlan, parseSummary, planPrompt, summarizePrompt, validateBatch } from './prompt'
-import { buildPreview, buildSnapshot, fingerprintOf, previewBlocking, recount, sameFingerprint } from './plan'
+import { BATCH_SIZE, type RawCategory, SUMMARY_BATCH_SIZE, chunk, classifyPrompt, parseDecisions, parsePlan, parseSummary, planPrompt, summarizePrompt, validateBatch } from './prompt'
+import { buildPreview, buildSnapshot, cloneCategories, fingerprintOf, flattenCategories, previewBlocking, recount, sameFingerprint } from './plan'
 import { applyUndo, checkUndo, executePreview, indexOf, recover } from './lifecycle'
 import { findIgnoredRequirements, normalizeName, sanitizeUrl, validateCategoryName } from './text'
 
 export class OperationError extends Error {
-  /** true 表示需要用户处理（重新生成预览、修正名称），而非重试。 */
   blocked: boolean
 
   constructor(message: string, blocked: boolean) {
@@ -25,13 +24,11 @@ export interface RunParams {
 
 export interface OrchestratorHooks {
   onProgress?: (progress: Progress) => void
-  /** 并发在飞的模型请求上限，MVP 固定为 2。 */
   concurrency?: number
 }
 
 export interface Classification {
   preview: Preview
-  /** 未支持的用户需求（破坏性指令），已忽略并需告知用户。 */
   ignoredRequirements: string[]
   skipped: boolean
 }
@@ -47,7 +44,7 @@ export interface Orchestrator {
   cancel: () => void
 }
 
-/** 分类流程：局部主题摘要 → 全局分类方案 → 按冻结方案分批裁决 → 预览。 */
+/** 分类流程：局部主题摘要 → 全局分类树方案 → 按冻结方案分批裁决 → 预览。 */
 export function createOrchestrator(tree: BookmarkTree, hooks: OrchestratorHooks = {}): Orchestrator {
   let abort: AbortController | null = null
 
@@ -66,8 +63,6 @@ export function createOrchestrator(tree: BookmarkTree, hooks: OrchestratorHooks 
         nodes: await tree.subtree(params.rootId),
         categoryLimit: params.categoryLimit,
       })
-
-      // 空范围不产生任何模型调用。
       if (snapshot.bookmarks.length === 0)
         return { preview: emptyPreview(snapshot), ignoredRequirements, skipped: true }
 
@@ -84,18 +79,22 @@ export function createOrchestrator(tree: BookmarkTree, hooks: OrchestratorHooks 
       const summaries = await mapWithConcurrency(
         chunk(snapshot.bookmarks, SUMMARY_BATCH_SIZE),
         hooks.concurrency ?? 2,
-        async (batch, index, count) =>
-          parseSummary(extractJson(await ask(summarizePrompt(snapshot.effectiveLimit, rowsOf(snapshot, batch), params.requirement), 'summarize', index + 1, count))),
+        async (batch, index, count) => parseSummary(extractJson(await ask(
+          summarizePrompt(snapshot.effectiveLimit, rowsOf(snapshot, batch), params.requirement),
+          'summarize',
+          index + 1,
+          count,
+        ))),
       )
-
       const planned = await ask(planPrompt(snapshot.effectiveLimit, summaries, params.requirement), 'plan', 1, 1)
       const categories = toCategories(parsePlan(extractJson(planned)), snapshot.effectiveLimit)
+      const categoryOptions = flattenCategories(categories).map(category => ({ id: category.id, name: category.name, parent_id: category.parentId }))
 
       const batches = chunk(snapshot.bookmarks, BATCH_SIZE)
       const decisions: Decision[] = []
       await mapWithConcurrency(batches, hooks.concurrency ?? 2, async (batch, index) => {
         const prompted = rowsOf(snapshot, batch)
-        const raw = await ask(classifyPrompt(categories, prompted, params.requirement), 'classify', index + 1, batches.length)
+        const raw = await ask(classifyPrompt(categoryOptions, prompted, params.requirement), 'classify', index + 1, batches.length)
         decisions.push(...validateBatch(prompted, parseDecisions(extractJson(raw))))
       })
 
@@ -109,11 +108,10 @@ export function createOrchestrator(tree: BookmarkTree, hooks: OrchestratorHooks 
     }
   }
 
-  /** 预览被用户编辑后重新统计；阻断项由 blockingOf 决定。 */
   function refresh(preview: Preview): Preview {
     const next: Preview = {
       ...preview,
-      categories: preview.categories.map(category => ({ ...category })),
+      categories: cloneCategories(preview.categories),
       rows: preview.rows.map(row => ({ ...row })),
     }
     recount(next)
@@ -121,7 +119,6 @@ export function createOrchestrator(tree: BookmarkTree, hooks: OrchestratorHooks 
   }
 
   async function execute(preview: Preview): Promise<OperationResult> {
-    // 执行前比对参与节点：存在性、父节点、标题、URL 或顺序变化都使整份预览失效。
     if (!sameFingerprint(preview.fingerprint, await tree.liveFingerprint(preview.rootId)))
       throw new OperationError('书签在预览后发生了变化，请重新生成预览', true)
 
@@ -129,7 +126,7 @@ export function createOrchestrator(tree: BookmarkTree, hooks: OrchestratorHooks 
       unchanged: preview.counts.unchanged,
       pending: preview.counts.pending,
       unclassifiable: preview.counts.unclassifiable,
-      targets: preview.categories.map(c => c.name),
+      targets: flattenCategories(preview.categories).map(c => c.name),
     }
     const result = await executePreview(preview, tree)
     if (!result.ok) {
@@ -140,23 +137,15 @@ export function createOrchestrator(tree: BookmarkTree, hooks: OrchestratorHooks 
         undo: { state: 'none' },
         changes: [],
         recovery: result.completed.length || result.createdFolders.length
-          ? {
-              rootId: preview.rootId,
-              createdAt: Date.now(),
-              createdFolders: result.createdFolders,
-              completed: result.completed,
-              remaining: result.remaining,
-            }
+          ? { rootId: preview.rootId, createdAt: Date.now(), createdFolders: result.createdFolders, completed: result.completed, remaining: result.remaining }
           : null,
         error: result.error,
       }
     }
 
-    // 记录整理后的落地索引，用于检测用户之后是否重新排序。
     const toIndexByNode = new Map<string, number>()
     for (const parentId of new Set(result.changes.map(change => change.toParent))) {
-      const children = await tree.children(parentId)
-      for (const child of children)
+      for (const child of await tree.children(parentId))
         toIndexByNode.set(child.id, child.index)
     }
     const record = makeUndoRecord(preview, result.changes, result.createdFolders, toIndexByNode)
@@ -192,7 +181,7 @@ export function createOrchestrator(tree: BookmarkTree, hooks: OrchestratorHooks 
     return {
       createdAt: Date.now(),
       rootId: preview.rootId,
-      categories: preview.categories.map(category => ({ ...category })),
+      categories: cloneCategories(preview.categories),
       entries,
       createdFolders: createdFolders.map(folder => ({ ...folder })),
       changes,
@@ -230,12 +219,7 @@ function rowsOf(snapshot: ScopeSnapshot, batch: BookmarkView[]): Array<{ id: str
     }
     return parts.join('/')
   }
-  return batch.map(node => ({
-    id: node.id,
-    title: node.title,
-    url: sanitizeUrl(node.url ?? '') ?? '',
-    path: pathOf(node),
-  }))
+  return batch.map(node => ({ id: node.id, title: node.title, url: sanitizeUrl(node.url ?? '') ?? '', path: pathOf(node) }))
 }
 
 function emptyPreview(snapshot: ScopeSnapshot): Preview {
@@ -244,44 +228,38 @@ function emptyPreview(snapshot: ScopeSnapshot): Preview {
     categories: [],
     rows: [],
     fingerprint: fingerprintOf(snapshot),
-    counts: {
-      total: 0,
-      moving: 0,
-      unchanged: 0,
-      pending: 0,
-      unclassifiable: snapshot.unclassifiable.length,
-      categories: 0,
-    },
+    counts: { total: 0, moving: 0, unchanged: 0, pending: 0, unclassifiable: snapshot.unclassifiable.length, categories: 0 },
     blocking: ['没有可分类的书签'],
   }
 }
 
-/**
- * 模型名称 → 扩展自有分类 ID。
- * 规范化后重名或名称非法时直接失败，绝不静默改名或截断。
- */
-function toCategories(names: string[], limit: number): Category[] {
-  const used = new Set<string>()
-  const categories: Category[] = []
-  for (const raw of names) {
-    if (categories.length >= limit)
-      break
-    const name = String(raw).trim()
-    const invalid = validateCategoryName(name)
-    if (invalid)
-      throw new OperationError(`模型给出的分类名称不可用（${invalid}）`, true)
-    const key = normalizeName(name)
-    if (used.has(key))
-      throw new OperationError(`模型给出的分类名称重复：${name}`, true)
-    used.add(key)
-    categories.push({ id: `c${categories.length + 1}`, name })
-  }
-  if (!categories.length)
+/** 模型嵌套方案 → 扩展自有稳定分类 ID；不截断、不合并、不放宽限制。 */
+function toCategories(rawCategories: RawCategory[], limit: number): Category[] {
+  if (!rawCategories.length)
     throw new OperationError('模型没有给出可用的分类名称', true)
-  return categories
+  let nextId = 1
+  const visit = (items: RawCategory[], parentId: string | null, depth: number): Category[] => {
+    if (depth > 3 && items.length)
+      throw new OperationError('模型生成的分类树超过三层', true)
+    if (items.length > limit)
+      throw new OperationError(`模型生成的第 ${depth} 层分类超过上限 ${limit}`, true)
+    const used = new Set<string>()
+    return items.map((raw) => {
+      const name = String(raw.name).trim()
+      const invalid = validateCategoryName(name)
+      if (invalid)
+        throw new OperationError(`模型给出的分类名称不可用（${invalid}）`, true)
+      const key = normalizeName(name)
+      if (used.has(key))
+        throw new OperationError(`模型给出的同级分类名称重复：${name}`, true)
+      used.add(key)
+      const id = `c${nextId++}`
+      return { id, name, parentId, children: visit(raw.children ?? [], id, depth + 1) }
+    })
+  }
+  return visit(rawCategories, null, 1)
 }
 
-/** 有界并发：至多 limit 个任务在飞；批次顺序不影响裁决归属。 */
 async function mapWithConcurrency<T, R>(items: T[], limit: number, run: (item: T, index: number, count: number) => Promise<R>): Promise<R[]> {
   const results: R[] = []
   let cursor = 0

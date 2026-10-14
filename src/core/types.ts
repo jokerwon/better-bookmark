@@ -1,4 +1,5 @@
 import type { Fingerprint } from './plan'
+
 /** 书签树中的一个可分类条目（与浏览器 API 解耦的最小视图）。 */
 export interface BookmarkView {
   id: string
@@ -68,10 +69,12 @@ export interface ScopeSnapshot {
   effectiveLimit: number
 }
 
-/** 分类方案中的一个一级分类。 */
+/** 分类树中的节点；节点可直接容纳书签，也可拥有子节点。 */
 export interface Category {
   id: string
   name: string
+  parentId: string | null
+  children: Category[]
 }
 
 export type Decision
@@ -100,12 +103,13 @@ export interface PreviewCounts {
 
 export interface Preview {
   rootId: string
+  /** 冻结方案的根分类节点，按模型返回的深度优先顺序排列。 */
   categories: Category[]
   rows: PreviewRow[]
   /** 预览对应的书签指纹：成员、父节点、标题、URL、原索引。 */
   fingerprint: Fingerprint
   counts: PreviewCounts
-  /** 阻断确认的预览级错误（重复分类名等）。 */
+  /** 阻断确认的预览级错误（非法或同级重复分类名等）。 */
   blocking: string[]
 }
 
@@ -158,10 +162,11 @@ export interface OperationResult {
   error: string | null
 }
 
-/** 本次操作创建的分类文件夹；名称与 id 一起记录，避免位置对齐出错。 */
+/** 本次操作创建的分类文件夹；名称与路径一起记录，避免位置对齐出错。 */
 export interface CreatedFolder {
   id: string
   name: string
+  categoryId: string
 }
 
 export interface PendingMove {
