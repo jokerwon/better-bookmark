@@ -333,7 +333,7 @@ function clearLocalData() {
 
       <label class="field-row">
         <span class="field-label">整理要求 <small>可选</small></span>
-        <textarea v-model="state.requirement" class="text-control text-area" rows="3" placeholder="例如：按用途分组，工作与生活分开" />
+        <textarea v-model="state.requirement" class="text-control text-area" rows="3" placeholder="例如：按用途分组，用英文命名；留空则跟随书签语言" />
       </label>
 
       <div class="field-row limit-row">

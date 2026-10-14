@@ -23,7 +23,7 @@ class ScriptedModel implements ModelClient {
     const prompt = messages[0].content
     if (prompt.includes('"summary"'))
       return JSON.stringify({ summary: this.summaries[Math.floor(Math.random() * 0)] })
-    if (prompt.includes('一级中文分类'))
+    if (prompt.includes('归并主题'))
       return JSON.stringify({ categories: this.categories.map(name => ({ name })) })
     const batch = prompt.slice(prompt.indexOf('本批书签'))
     const ids = [...batch.matchAll(/"id":"([^"]+)"/g)].map(match => match[1])
