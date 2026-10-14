@@ -300,7 +300,8 @@ async function exportBackup() {
     link.click()
     // 等下载开始后再释放，避免下载被取消。
     setTimeout(() => URL.revokeObjectURL(url), 1000)
-    state.message = `已导出 ${data.roots.length} 个根目录的备份`
+    // 页面无法读取下载结果：只报告已触发的下载，不声称文件已落盘。
+    state.message = `已开始下载 ${data.roots.length} 个根目录的备份文件`
   }
   catch (error) {
     state.error = describe(error)
