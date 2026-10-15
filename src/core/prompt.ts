@@ -35,7 +35,7 @@ ${JSON.stringify({ bookmarks: batch.map(b => ({ title: b.title, url: b.url, path
 export function planPrompt(limit: number, summaries: string[], requirement: string): string {
   return `你是浏览器书签整理助手。下面是各批次书签的局部主题摘要，请归并主题并提出一个最多${MAX_TREE_DEPTH}层的嵌套分类树。
 只输出 JSON：{"categories":[{"name":"分类名称","children":[{"name":"子分类名称"}]}]}
-- 根层、第二层和第三层各自的节点数量不超过 ${limit} 个；不得输出空名称或重复的同级名称。
+- 每一层的节点数量不超过 ${limit} 个；不得输出空名称或重复的同级名称。
 - 节点顺序将被冻结并用于创建文件夹。
 ${CONSTRAINTS}
 ${UNTRUSTED_NOTICE}

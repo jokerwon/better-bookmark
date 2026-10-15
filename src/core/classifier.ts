@@ -241,7 +241,7 @@ function toCategories(rawCategories: RawCategory[], limit: number): Category[] {
   const levelCounts = new Map<number, number>()
   const visit = (items: RawCategory[], parentId: string | null, depth: number): Category[] => {
     if (depth > MAX_TREE_DEPTH && items.length)
-      throw new OperationError('模型生成的分类树超过三层', true)
+      throw new OperationError(`模型生成的分类树超过 ${MAX_TREE_DEPTH} 层`, true)
     // 上限按层累计：同一层所有节点的总数不得超过上限，而不是每个父节点各自受限。
     const total = (levelCounts.get(depth) ?? 0) + items.length
     levelCounts.set(depth, total)

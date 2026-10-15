@@ -97,7 +97,7 @@
 ### Preview, execution, recovery, and undo
 
 - The single test seam is the end-to-end application-level classification workflow, replacing only the browser bookmarks API with an in-memory tree adapter and the OpenAI-compatible service with a deterministic model-client adapter. Internal prompt formatting and loop structure are not separate contracts.
-- Preview displays a collapsible nested classification tree with incremental display, title/URL filtering, cancellation, multi-item reassignment, rename, and classification-node deletion. Filtering preserves matching bookmarks and expands their ancestors. Deleting a node deletes its proposed subtree and makes its items pending. `counts.categories` is the total number of nodes in the classification tree.
+- Preview displays a collapsible nested classification tree with incremental display, title/URL filtering, cancellation, multi-item reassignment, rename, and classification-node deletion. Filtering preserves matching bookmarks and expands the matching nodes together with their ancestors; the pending group uses the same filtered result for its count and its list. Deleting a node deletes its proposed subtree and makes its items pending. `counts.categories` is the total number of nodes in the classification tree.
 - Before confirmation and immediately before execution, compare the participating snapshot. Any existence, parent ID, title, URL, or selected-range change invalidates the complete preview and requires full regeneration.
 - After final confirmation, resolve or create target folders along each complete relative path, verify all targets, then move bookmarks in stable original traversal order. Append new items after existing target contents. Do not create empty targets.
 - Record for recovery and undo: bookmark node ID, original parent ID, target parent ID, original index, post-operation title, post-operation URL, and IDs of folders created by the operation. Store no notes and no full tree copy.
@@ -119,7 +119,7 @@
 - Cover the happy path, folder reuse along nested paths, folder and bookmark ordering, pending and unchanged items, and no-empty-folder behavior.
 - Cover empty and small scopes, 3–15 per-level limits, one-, two-, and three-level trees, nested folders, duplicate URLs, unsupported URLs, duplicate sibling names, and the 5,000-bookmark path.
 - Cover malformed JSON, malformed nested plans, over-depth and over-limit plans, unknown/duplicate/missing IDs, invalid category-node IDs, invalid decisions, and explicit pending; prove no mutation occurs.
-- Cover nested-tree preview rename, invalid-name blocking, sibling conflicts, subtree deletion, cancellation, batch reassignment, filtering with ancestor expansion, and total-node counts.
+- Cover nested-tree preview rename, invalid-name blocking, sibling conflicts, subtree deletion, cancellation, batch reassignment, filtering with matching-node and ancestor expansion, and total-node counts.
 - Cover external title/URL/parent/existence/range changes before confirmation and execution; prove stale previews cannot move bookmarks.
 - Cover folder-creation failure, move failure, recovery success/conflicts, browser restart with incomplete recovery, and preservation of existing folders.
 - Cover undo success, original order restoration, whole-undo disabling on related change, retained disabled records, empty-created-folder removal, no-op snapshot preservation, and configuration changes not affecting undo.

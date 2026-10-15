@@ -146,7 +146,7 @@ describe('分类树协议', () => {
 
   it('超深、超限与同级重名的嵌套方案被拒绝且不改动书签', async () => {
     const cases: Array<[unknown, string]> = [
-      [[{ name: '一', children: [{ name: '二', children: [{ name: '三', children: [{ name: '四' }] }] }] }], '超过三层'],
+      [[{ name: '一', children: [{ name: '二', children: [{ name: '三', children: [{ name: '四' }] }] }] }], '超过 3 层'],
       [[{ name: '一' }, { name: '二' }, { name: '三' }, { name: '四' }], '第 1 层分类超过上限 3'],
       [[{ name: '一', children: [{ name: '二' }, { name: '三' }, { name: '四' }, { name: '五' }] }], '第 2 层分类超过上限 3'],
       [[{ name: '一', children: [{ name: '二' }, { name: ' 二 ' }] }], '同级分类名称重复'],
