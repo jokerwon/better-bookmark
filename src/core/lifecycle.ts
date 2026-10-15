@@ -17,6 +17,10 @@ export async function executePreview(
   const categories = flattenCategories(preview.categories)
   const used = new Set(preview.rows.map(row => row.categoryId).filter((id): id is string => Boolean(id)))
   const categoryById = new Map(categories.map(category => [category.id, category]))
+  for (const category of categories) {
+    if (category.parentId && !categoryById.has(category.parentId))
+      return { ok: false, error: `分类「${category.name}」的父分类缺失，未移动任何书签`, createdFolders: [], completed: [], remaining: [] }
+  }
 
   const resolveFolder = async (category: Category): Promise<string> => {
     const existing = folderByCategory.get(category.id)
@@ -30,20 +34,23 @@ export async function executePreview(
       return match.id
     }
     const folder = await tree.createFolder(parentId, category.name.trim())
-    createdFolders.push({ id: folder.id, name: folder.title, categoryId: category.id })
+    createdFolders.push({ id: folder.id, name: folder.title })
     folderByCategory.set(category.id, folder.id)
     return folder.id
   }
 
+  let current: Category | null = null
   try {
     for (const category of categories) {
-      if (used.has(category.id))
+      if (used.has(category.id)) {
+        current = category
         await resolveFolder(category)
+      }
     }
   }
   catch {
     await removeEmpty(tree, createdFolders)
-    return { ok: false, error: '创建分类文件夹失败，未移动任何书签', createdFolders: [], completed: [], remaining: [] }
+    return { ok: false, error: `创建分类「${current?.name ?? ''}」的文件夹失败，未移动任何书签`, createdFolders: [], completed: [], remaining: [] }
   }
 
   for (const category of categories) {
@@ -91,7 +98,9 @@ async function removeEmpty(tree: BookmarkTree, folders: CreatedFolder[]): Promis
       if ((await tree.children(folder.id)).length === 0)
         await tree.remove(folder.id)
     }
-    catch {}
+    catch {
+      // 清理是尽力而为：失败时保留已建文件夹，由恢复或撤销流程继续处理。
+    }
   }
 }
 

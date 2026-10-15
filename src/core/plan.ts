@@ -1,5 +1,5 @@
 import type { Bookmarks } from 'webextension-polyfill'
-import type { BookmarkView, Category, Decision, Preview, PreviewRow, ScopeSnapshot } from './types'
+import type { BookmarkView, Category, Decision, Preview, PreviewGroup, PreviewRow, ScopeSnapshot } from './types'
 import { isClassifiable, normalizeName, sanitizeUrl, validateCategoryName } from './text'
 
 /** 把书签树展平为分类范围快照：可分类书签、无法分类书签、有效分类上限。 */
@@ -39,8 +39,9 @@ export function cloneCategories(categories: Category[]): Category[] {
   return categories.map(category => ({ ...category, children: cloneCategories(category.children) }))
 }
 
-function categoryMap(categories: Category[]): Map<string, Category> {
-  return new Map(flattenCategories(categories).map(category => [category.id, category]))
+/** 筛选命中：空筛选命中全部。 */
+function matchesFilter(row: PreviewRow, needle: string): boolean {
+  return !needle || row.title.toLowerCase().includes(needle) || row.displayUrl.toLowerCase().includes(needle)
 }
 
 /** 构造预览：校验裁决完整性并计算统计。 */
@@ -157,16 +158,42 @@ export function previewBlocking(preview: Preview): string[] {
   return [...new Set(blocking)]
 }
 
-/** 预览分组：按冻结树的深度优先顺序返回各分类及其书签。 */
-export function rowsByCategory(preview: Preview): Array<{ category: Category, rows: PreviewRow[] }> {
-  const groups = flattenCategories(preview.categories).map(category => ({
-    category,
-    rows: preview.rows.filter(row => row.categoryId === category.id),
-  }))
-  const pendingRows = preview.rows.filter(row => !row.categoryId)
-  if (pendingRows.length)
-    groups.push({ category: { id: '__pending__', name: '待确认', parentId: null, children: [] }, rows: pendingRows })
-  return groups
+/** 预览分组：按冻结树的深度优先顺序返回分类、缩进深度、完整路径标签与筛选后的书签。 */
+export function groupRows(preview: Preview, filter: string): PreviewGroup[] {
+  const needle = filter.trim().toLowerCase()
+  const categories = flattenCategories(preview.categories)
+  const parentById = new Map(categories.map(category => [category.id, category.parentId]))
+  const matchedIds = new Set(preview.rows.filter(row => row.categoryId && matchesFilter(row, needle)).map(row => row.categoryId!))
+  const expanded = new Set<string>()
+  for (const id of matchedIds) {
+    let current: string | null = id
+    while (current && !expanded.has(current)) {
+      expanded.add(current)
+      current = parentById.get(current) ?? null
+    }
+  }
+  const labelById = new Map<string, string>()
+  const depthById = new Map<string, number>()
+  return categories
+    .map((category): PreviewGroup => {
+      const parentLabel = category.parentId ? labelById.get(category.parentId) : undefined
+      labelById.set(category.id, parentLabel ? `${parentLabel} / ${category.name}` : category.name)
+      depthById.set(category.id, category.parentId ? (depthById.get(category.parentId) ?? 0) + 1 : 0)
+      return {
+        category,
+        depth: depthById.get(category.id)!,
+        label: labelById.get(category.id)!,
+        rows: preview.rows.filter(row => row.categoryId === category.id && matchesFilter(row, needle)),
+        expanded: expanded.has(category.id),
+      }
+    })
+    .filter(group => !needle || group.rows.length > 0 || group.expanded)
+}
+
+/** 待确认书签：同样受筛选约束，供预览计数与列表共用。 */
+export function pendingRows(preview: Preview, filter: string): PreviewRow[] {
+  const needle = filter.trim().toLowerCase()
+  return preview.rows.filter(row => !row.categoryId && matchesFilter(row, needle))
 }
 
 /** 预览中可选的重新指派目标：现有分类，或留空表示待确认。 */
@@ -210,10 +237,6 @@ export function renameCategory(preview: Preview, categoryId: string, name: strin
   const next: Preview = { ...preview, categories: rename(preview.categories), rows: preview.rows.map(row => ({ ...row })), blocking: [...preview.blocking] }
   recount(next)
   return next
-}
-
-export function categoryById(categories: Category[], id: string): Category | undefined {
-  return categoryMap(categories).get(id)
 }
 
 /** 预览与执行共用的指纹：成员身份、位置、标题与 URL。 */

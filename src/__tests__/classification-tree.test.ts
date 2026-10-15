@@ -151,6 +151,7 @@ describe('分类树协议', () => {
       [[{ name: '一', children: [{ name: '二' }, { name: '三' }, { name: '四' }, { name: '五' }] }], '第 2 层分类超过上限 3'],
       [[{ name: '一', children: [{ name: '二' }, { name: ' 二 ' }] }], '同级分类名称重复'],
       [[{ name: '一', children: [{ name: '二/三' }] }], '分类名称不可用'],
+      [[{ name: '一', children: [{ name: '二' }, { name: '三' }] }, { name: '四', children: [{ name: '五' }, { name: '六' }] }], '第 2 层分类超过上限 3'],
     ]
     for (const [categories, message] of cases) {
       const { memory, root } = nestedFixture()
@@ -158,6 +159,17 @@ describe('分类树协议', () => {
       await expect(orchestrator.classify({ rootId: root, categoryLimit: 3, requirement: '' }, new NestedModel(categories))).rejects.toThrow(message)
       expect(memory.titlesOf(root)).toEqual(['A', 'B', 'C'])
     }
+  })
+
+  it('上限按层累计，而不是整棵树的总量', async () => {
+    const { memory, root } = nestedFixture()
+    const orchestrator = createOrchestrator(memory.createTree())
+    const run = await orchestrator.classify({ rootId: root, categoryLimit: 3, requirement: '' }, new NestedModel([
+      { name: '一', children: [{ name: '甲' }] },
+      { name: '二', children: [{ name: '乙' }] },
+      { name: '三', children: [{ name: '丙' }] },
+    ]))
+    expect(run.preview.counts.categories).toBe(6)
   })
 
   it('嵌套节点重命名到同级同名会被阻断，跨层级同名允许', async () => {

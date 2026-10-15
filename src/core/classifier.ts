@@ -1,7 +1,7 @@
 import type { BookmarkTree, BookmarkView, Category, CreatedFolder, Decision, OperationResult, Preview, Progress, RecoveryState, ScopeSnapshot, UndoRecord, UndoStatus } from './types'
 import type { ModelClient } from './model'
 import { extractJson, withRetries } from './model'
-import { BATCH_SIZE, type RawCategory, SUMMARY_BATCH_SIZE, chunk, classifyPrompt, parseDecisions, parsePlan, parseSummary, planPrompt, summarizePrompt, validateBatch } from './prompt'
+import { BATCH_SIZE, MAX_TREE_DEPTH, type RawCategory, SUMMARY_BATCH_SIZE, chunk, classifyPrompt, parseDecisions, parsePlan, parseSummary, planPrompt, summarizePrompt, validateBatch } from './prompt'
 import { buildPreview, buildSnapshot, cloneCategories, fingerprintOf, flattenCategories, previewBlocking, recount, sameFingerprint } from './plan'
 import { applyUndo, checkUndo, executePreview, indexOf, recover } from './lifecycle'
 import { findIgnoredRequirements, normalizeName, sanitizeUrl, validateCategoryName } from './text'
@@ -238,10 +238,14 @@ function toCategories(rawCategories: RawCategory[], limit: number): Category[] {
   if (!rawCategories.length)
     throw new OperationError('模型没有给出可用的分类名称', true)
   let nextId = 1
+  const levelCounts = new Map<number, number>()
   const visit = (items: RawCategory[], parentId: string | null, depth: number): Category[] => {
-    if (depth > 3 && items.length)
+    if (depth > MAX_TREE_DEPTH && items.length)
       throw new OperationError('模型生成的分类树超过三层', true)
-    if (items.length > limit)
+    // 上限按层累计：同一层所有节点的总数不得超过上限，而不是每个父节点各自受限。
+    const total = (levelCounts.get(depth) ?? 0) + items.length
+    levelCounts.set(depth, total)
+    if (total > limit)
       throw new OperationError(`模型生成的第 ${depth} 层分类超过上限 ${limit}`, true)
     const used = new Set<string>()
     return items.map((raw) => {

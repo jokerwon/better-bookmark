@@ -92,6 +92,18 @@ export interface PreviewRow {
   categoryId: string | null
 }
 
+/** 预览中的一个分类分组：缩进深度与完整路径标签由分类树推导。 */
+export interface PreviewGroup {
+  category: Category
+  /** 从根分类起的层级，根层为 0。 */
+  depth: number
+  /** 完整相对路径标签，用于区分不同路径下的同名分类。 */
+  label: string
+  rows: PreviewRow[]
+  /** 自身或其后代命中筛选时为真，用于保持命中结果展开。 */
+  expanded: boolean
+}
+
 export interface PreviewCounts {
   total: number
   moving: number
@@ -162,11 +174,10 @@ export interface OperationResult {
   error: string | null
 }
 
-/** 本次操作创建的分类文件夹；名称与路径一起记录，避免位置对齐出错。 */
+/** 本次操作创建的分类文件夹；名称用于撤销前校验，避免位置对齐出错。 */
 export interface CreatedFolder {
   id: string
   name: string
-  categoryId: string
 }
 
 export interface PendingMove {

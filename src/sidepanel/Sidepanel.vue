@@ -7,7 +7,7 @@ import { buildBackup, importBackup, parseBackup } from '~/core/backup'
 import { resolveConfig } from '~/core/config'
 import { CONNECTION_TEST_MESSAGES, ModelError, createModelClient } from '~/core/model'
 import { ensureHostPermission } from '~/core/permissions'
-import { deleteCategory, flattenCategories, reassign, renameCategory } from '~/core/plan'
+import { deleteCategory, groupRows, pendingRows, reassign, renameCategory } from '~/core/plan'
 import { useWebExtensionStorage } from '~/composables/useWebExtensionStorage'
 import type { BackupFile, BackupNode } from '~/core/backup'
 import type { BookmarkView, OperationResult, Preview, Progress, RecoveryState, UndoRecord, UndoStatus } from '~/core/types'
@@ -52,27 +52,11 @@ const resolved = computed(() => resolveConfig(config.value))
 /** 首次分类，以及 Base URL 或模型变化后，都需要重新确认隐私边界。 */
 const consentNeeded = computed(() => resolved.value.ok && consent.value.originKey !== resolved.value.value.originKey)
 const blocking = computed(() => (preview.value ? orchestrator.blockingOf(preview.value) : []))
-const categoryOptions = computed(() => preview.value ? flattenCategories(preview.value.categories) : [])
-const groups = computed(() => {
-  if (!preview.value)
-    return []
-  const needle = state.filter.trim().toLowerCase()
-  const rows = preview.value.rows.filter(row => !needle || row.title.toLowerCase().includes(needle) || row.displayUrl.toLowerCase().includes(needle))
-  const ids = new Set(rows.map(row => row.categoryId).filter((id): id is string => Boolean(id)))
-  const expanded = new Set<string>()
-  for (const category of categoryOptions.value) {
-    if (!ids.has(category.id))
-      continue
-    let parent = category.parentId
-    while (parent) {
-      expanded.add(parent)
-      parent = categoryOptions.value.find(item => item.id === parent)?.parentId ?? null
-    }
-  }
-  return categoryOptions.value
-    .map(category => ({ category, rows: rows.filter(row => row.categoryId === category.id), expanded: expanded.has(category.id) }))
-    .filter(group => !needle || group.rows.length > 0 || expanded.has(group.category.id))
-})
+/** 全部分类分组（不筛选）：批量改派下拉用它展示完整路径。 */
+const allGroups = computed(() => preview.value ? groupRows(preview.value, '') : [])
+/** 展示用分组：按筛选保留命中书签的节点及其祖先，并保持命中结果展开。 */
+const groups = computed(() => preview.value ? groupRows(preview.value, state.filter) : [])
+const pendingGroup = computed(() => preview.value ? pendingRows(preview.value, state.filter) : [])
 /** 备份里有当前浏览器不存在的根标题时，需要用户指定落到哪个文件夹。 */
 const unmatchedRoots = computed(() => pendingImport.value
   ? pendingImport.value.data.roots.filter(root => !state.roots.some(live => live.title === root.title))
@@ -511,12 +495,12 @@ async function confirmImport() {
         <span>已选 {{ selected.length }} 条</span>
         <select class="mini-control" aria-label="批量改派分类" @change="batchAssign(($event.target as HTMLSelectElement).value || null)">
           <option value="">改为待确认</option>
-          <option v-for="category in categoryOptions" :key="category.id" :value="category.id">{{ category.name }}</option>
+          <option v-for="option in allGroups" :key="option.category.id" :value="option.category.id">{{ option.label }}</option>
         </select>
       </div>
 
       <div class="category-list">
-        <details v-for="group in groups" :key="group.category.id" :open="group.expanded || !state.filter" class="category-group" :style="{ marginLeft: `${group.category.parentId ? 16 : 0}px` }">
+        <details v-for="group in groups" :key="group.category.id" :open="group.expanded || !state.filter" class="category-group" :style="{ marginLeft: `${group.depth * 16}px` }">
           <summary>
             <span class="category-summary">
               <span class="category-marker"></span>
@@ -532,9 +516,9 @@ async function confirmImport() {
             </li>
           </ul>
         </details>
-        <details v-if="preview.counts.pending" open class="category-group">
-          <summary><span class="category-summary"><span class="category-marker is-pending"></span><span class="category-name">待确认</span></span><span class="category-count">{{ preview.counts.pending }}</span></summary>
-          <ul class="bookmark-list"><li v-for="row in preview.rows.filter(row => !row.categoryId && (!state.filter || row.title.toLowerCase().includes(state.filter.trim().toLowerCase()) || row.displayUrl.toLowerCase().includes(state.filter.trim().toLowerCase())))" :key="row.bookmarkId"><label><input type="checkbox" :checked="selected.includes(row.bookmarkId)" @change="toggleSelect(row.bookmarkId)"><span>{{ row.title || row.displayUrl }}</span></label><small :title="row.displayUrl">{{ row.displayUrl }}</small></li></ul>
+        <details v-if="pendingGroup.length" open class="category-group">
+          <summary><span class="category-summary"><span class="category-marker is-pending"></span><span class="category-name">待确认</span></span><span class="category-count">{{ pendingGroup.length }}</span></summary>
+          <ul class="bookmark-list"><li v-for="row in pendingGroup" :key="row.bookmarkId"><label><input type="checkbox" :checked="selected.includes(row.bookmarkId)" @change="toggleSelect(row.bookmarkId)"><span>{{ row.title || row.displayUrl }}</span></label><small :title="row.displayUrl">{{ row.displayUrl }}</small></li></ul>
         </details>
       </div>
 
