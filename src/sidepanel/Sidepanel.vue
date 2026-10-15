@@ -68,6 +68,7 @@ const groups = computed(() => {
       expanded.add(parent)
       parent = categoryOptions.value.find(item => item.id === parent)?.parentId ?? null
     }
+  }
   return categoryOptions.value
     .map(category => ({ category, rows: rows.filter(row => row.categoryId === category.id), expanded: expanded.has(category.id) }))
     .filter(group => !needle || group.rows.length > 0 || expanded.has(group.category.id))

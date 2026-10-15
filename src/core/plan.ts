@@ -94,13 +94,33 @@ export function recount(preview: Preview): void {
   const validIds = new Set(categories.map(c => c.id))
   const parentOf = new Map(preview.fingerprint.map(([id, parent]) => [id, parent]))
   const titleById = new Map(preview.fingerprint.map(([id, , title]) => [id, title]))
+  const categoryById = new Map(categories.map(category => [category.id, category]))
+  // 与执行一致：按从根开始的完整相对路径判定未移动，避免不同路径下的同名节点被当成不变。
+  const pathOfBookmark = (bookmarkId: string): string[] => {
+    const path: string[] = []
+    let current = parentOf.get(bookmarkId) ?? ''
+    while (current && current !== preview.rootId && titleById.has(current)) {
+      path.unshift(normalizeName(titleById.get(current)!))
+      current = parentOf.get(current) ?? ''
+    }
+    return path
+  }
+  const pathOfCategory = (categoryId: string): string[] => {
+    const path: string[] = []
+    let current = categoryById.get(categoryId)
+    while (current) {
+      path.unshift(normalizeName(current.name))
+      current = current.parentId ? categoryById.get(current.parentId) : undefined
+    }
+    return path
+  }
   const pending = preview.rows.filter(row => !row.categoryId || !validIds.has(row.categoryId)).length
   const unchanged = preview.rows.filter((row) => {
-    const category = categories.find(c => c.id === row.categoryId)
-    if (!category)
+    if (!row.categoryId || !validIds.has(row.categoryId))
       return false
-    const parentTitle = titleById.get(parentOf.get(row.bookmarkId) ?? '') ?? ''
-    return Boolean(parentTitle) && normalizeName(category.name) === normalizeName(parentTitle)
+    const from = pathOfBookmark(row.bookmarkId)
+    const to = pathOfCategory(row.categoryId)
+    return to.length > 0 && from.length === to.length && from.every((segment, index) => segment === to[index])
   }).length
   preview.counts = {
     total: preview.rows.length,
