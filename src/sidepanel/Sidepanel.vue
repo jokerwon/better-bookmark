@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref, shallowRef } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, shallowRef, watch } from 'vue'
 import { OperationError, createOrchestrator } from '~/core/classifier'
 import { browserApi } from '~/core/browser-api'
 import { createBrowserTree } from '~/core/browser-tree'
@@ -20,7 +20,7 @@ const state = reactive({
   /** 导入时备份根标题在当前浏览器找不到同名根，就落到这个文件夹。 */
   fallbackRootId: '',
   requirement: '',
-  showingKey: false,
+  testing: false,
   testState: '' as '' | 'ok' | 'fail',
   testMessage: '',
   progress: null as Progress | null,
@@ -29,7 +29,7 @@ const state = reactive({
   error: '',
   ignored: [] as string[],
   dropped: [] as BookmarkView[],
-  filter: '',
+  filter: new URLSearchParams(location.search).get('filter') ?? '',
   result: null as OperationResult | null,
   undoStatus: { state: 'none' } as UndoStatus,
 })
@@ -47,6 +47,17 @@ const orchestrator = createOrchestrator(browserTree, {
 
 const preview = shallowRef<Preview | null>(null)
 const selected = ref<string[]>([])
+const previewPanel = ref<HTMLElement | null>(null)
+const clearDialog = ref<HTMLDialogElement | null>(null)
+
+watch(() => state.filter, (value) => {
+  const url = new URL(location.href)
+  if (value)
+    url.searchParams.set('filter', value)
+  else
+    url.searchParams.delete('filter')
+  history.replaceState(null, '', url)
+})
 
 const resolved = computed(() => resolveConfig(config.value))
 /** 首次分类，以及 Base URL 或模型变化后，都需要重新确认隐私边界。 */
@@ -86,6 +97,9 @@ function openOptions() {
 }
 
 async function testConnection() {
+  if (state.testing)
+    return
+  state.testing = true
   state.testState = ''
   state.testMessage = ''
   try {
@@ -101,6 +115,9 @@ async function testConnection() {
   catch (error) {
     state.testState = 'fail'
     state.testMessage = describe(error)
+  }
+  finally {
+    state.testing = false
   }
 }
 
@@ -136,6 +153,13 @@ async function classify() {
     )
     preview.value = run.preview
     selected.value = []
+    if (run.skipped) {
+      preview.value = null
+    }
+    else {
+      await nextTick()
+      previewPanel.value?.focus()
+    }
     state.ignored = run.ignoredRequirements
     if (run.skipped) {
       state.message = '该文件夹内没有可分类的书签，未调用模型'
@@ -266,6 +290,7 @@ async function runRecovery() {
 }
 
 function clearLocalData() {
+  clearDialog.value?.close()
   // 只清除扩展本地数据，绝不删除浏览器书签。
   config.value = { apiKey: '', baseUrl: '', model: '', categoryLimit: 8 }
   consent.value = { originKey: '', acceptedAt: 0 }
@@ -386,42 +411,62 @@ async function confirmImport() {
   <main id="main-content" class="workspace-shell" tabindex="-1">
     <header class="topbar">
       <div class="brand-lockup">
-        <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 28" fill="none"><path d="M6 3h12v22l-6-4-6 4V3Z" stroke="currentColor" stroke-width="1.5"/><path d="M9 8h6M9 12h6" stroke="currentColor" stroke-width="1.5"/></svg></span>
-        <div><p class="brand-name">智能书签分类</p><p class="brand-caption" lang="en">Better Bookmark</p></div>
+        <div>
+          <p class="brand-name" lang="en">
+            BETTER<br>BOOKMARK.
+          </p><p class="brand-caption">
+            智能书签分类
+          </p>
+        </div>
       </div>
-      <button class="button-ghost-sm" type="button" @click="openOptions">模型设置 <span aria-hidden="true">↗</span></button>
+      <button class="button-ghost-sm" type="button" @click="openOptions">
+        模型设置 <span aria-hidden="true">↗</span>
+      </button>
     </header>
 
     <div class="workspace-intro">
-      <p class="eyebrow" lang="en">BOOKMARK ORGANIZER</p>
-      <h1>给书签一个好去处。</h1>
-      <p>先预览分类，再决定移动。</p>
+      <h1>{{ preview ? '审阅。' : state.result && !state.result.error ? '完成。' : '整理。' }}</h1>
+      <p>{{ preview ? '检查每个去处，再确认移动。' : '先生成分类预览。书签由你确认后移动。' }}</p>
     </div>
 
     <ol class="workflow" aria-label="整理流程">
-      <li :class="{ 'is-active': !preview && state.undoStatus.state !== 'available' }" :aria-current="!preview && state.undoStatus.state !== 'available' ? 'step' : undefined"><span>1</span>选择范围</li>
-      <li :class="{ 'is-active': !!preview }" :aria-current="preview ? 'step' : undefined"><span>2</span>检查预览</li>
-      <li :class="{ 'is-active': !preview && state.undoStatus.state === 'available' }" :aria-current="!preview && state.undoStatus.state === 'available' ? 'step' : undefined"><span>3</span>确认移动</li>
+      <li :class="{ 'is-active': !preview && !(state.result && !state.result.error) }" :aria-current="!preview && !(state.result && !state.result.error) ? 'step' : undefined">
+        选择范围
+      </li>
+      <li :class="{ 'is-active': !!preview }" :aria-current="preview ? 'step' : undefined">
+        检查预览
+      </li>
+      <li :class="{ 'is-active': !preview && state.result && !state.result.error }" :aria-current="!preview && state.result && !state.result.error ? 'step' : undefined">
+        完成移动
+      </li>
     </ol>
 
     <section class="status-strip" :class="resolved.ok ? 'is-ready' : 'is-warning'" aria-live="polite">
-      <span class="status-dot" aria-hidden="true"></span>
+      <span class="status-dot" aria-hidden="true" />
       <div class="status-copy">
         <strong>{{ resolved.ok ? '模型已配置' : '连接你的模型' }}</strong>
-        <p v-if="resolved.ok">{{ config.model }} · {{ resolved.value.origin }}</p>
-        <p v-else>{{ resolved.error }}，完成设置后即可开始。</p>
+        <p v-if="resolved.ok">
+          {{ config.model }} · {{ resolved.value.origin }}
+        </p>
+        <p v-else>
+          {{ resolved.error }}，完成设置后即可开始。
+        </p>
       </div>
-      <button v-if="!resolved.ok" class="button-ghost-sm status-action" type="button" @click="openOptions">去设置</button>
-      <button v-else class="button-ghost-sm status-action" type="button" :disabled="state.busy" @click="testConnection">
-        {{ state.testState === 'ok' ? '重新测试' : '测试连接' }}
+      <button v-if="!resolved.ok" class="button-ghost-sm status-action" type="button" @click="openOptions">
+        去设置
+      </button>
+      <button v-else class="button-ghost-sm status-action" type="button" :disabled="state.busy || state.testing" @click="testConnection">
+        {{ state.testing ? '测试中…' : '测试连接' }}
       </button>
     </section>
 
-    <section class="setup-panel" aria-labelledby="setup-title">
-      <div class="panel-heading">
-        <h2 id="setup-title">整理书签</h2>
-        <span class="section-meta">先预览 · 不直接移动</span>
-      </div>
+    <details class="setup-panel" :open="!preview">
+      <summary class="panel-heading setup-heading">
+        <h2 id="setup-title">
+          {{ preview ? '调整整理要求' : '分类范围与要求' }}
+        </h2>
+        <span class="disclosure-symbol" aria-hidden="true" />
+      </summary>
 
       <label class="field-row">
         <span class="field-label">分类范围</span>
@@ -439,7 +484,9 @@ async function confirmImport() {
       <div class="field-row limit-row">
         <div>
           <span class="field-label">分类数量上限</span>
-          <p class="field-help">每层 3–15 个，最多三层。</p>
+          <p class="field-help">
+            每层 3–15 个，最多三层。
+          </p>
         </div>
         <input v-model.number="config.categoryLimit" class="number-control" type="number" min="3" max="15" :disabled="state.busy" aria-label="分类数量上限">
       </div>
@@ -449,7 +496,9 @@ async function confirmImport() {
         <div>
           <strong>发送前，由你授权</strong>
           <p>仅向你配置的模型发送书签标题、脱敏 URL 与相对路径。不抓取网页正文；query、凭据和 fragment 不会离开浏览器。</p>
-          <button class="text-action" type="button" @click="acceptConsent">我已了解并同意</button>
+          <button class="text-action" type="button" @click="acceptConsent">
+            同意向此模型发送必要信息
+          </button>
         </div>
       </div>
 
@@ -457,24 +506,48 @@ async function confirmImport() {
         <button class="button-primary" type="button" :disabled="state.busy || consentNeeded || !resolved.ok" @click="classify">
           <span>{{ state.busy ? '正在处理' : '生成分类预览' }}</span><span aria-hidden="true">→</span>
         </button>
-        <button v-if="state.busy" class="button-secondary" type="button" @click="orchestrator.cancel()">取消</button>
+        <button v-if="state.busy" class="button-secondary" type="button" @click="orchestrator.cancel()">
+          取消
+        </button>
       </div>
+      <p v-if="!resolved.ok" class="field-help">
+        请先在模型设置中填写连接信息。
+      </p>
+      <p v-else-if="consentNeeded" class="field-help">
+        确认上方隐私说明后，即可生成预览。
+      </p>
 
       <div v-if="state.progress" class="progress-block" aria-live="polite">
-        <div class="progress-meta"><span>{{ { summarize: '读取书签信息', plan: '生成分类方案', classify: '逐项分类' }[state.progress.stage] }}</span><strong>{{ state.progress.done }}/{{ state.progress.total }}</strong></div>
-        <progress class="progress-track" :value="state.progress.done" :max="state.progress.total || 1" aria-label="分类进度"></progress>
-        <p v-if="state.progress.message">{{ state.progress.message }}</p>
+        <div class="progress-meta">
+          <span>{{ { summarize: '读取书签信息', plan: '生成分类方案', classify: '逐项分类' }[state.progress.stage] }}</span><strong>{{ state.progress.done }}/{{ state.progress.total }}</strong>
+        </div>
+        <progress class="progress-track" :value="state.progress.done" :max="state.progress.total || 1" aria-label="分类进度" />
+        <p v-if="state.progress.message">
+          {{ state.progress.message }}
+        </p>
       </div>
-    </section>
+    </details>
 
-    <p v-if="state.testMessage" class="notice" :class="state.testState === 'ok' ? 'notice-success' : 'notice-error'" role="status">{{ state.testMessage }}</p>
-    <p v-if="state.error" class="notice notice-error" role="alert">{{ state.error }}</p>
-    <p v-if="state.message" class="notice notice-success" role="status">{{ state.message }}</p>
-    <ul v-if="state.ignored.length" class="notice notice-muted"><li v-for="item in state.ignored" :key="item">已忽略不支持的要求：{{ item }}</li></ul>
+    <p v-if="state.testMessage" class="notice" :class="state.testState === 'ok' ? 'notice-success' : 'notice-error'" role="status">
+      {{ state.testMessage }}
+    </p>
+    <p v-if="state.error" class="notice notice-error" role="alert">
+      {{ state.error }}
+    </p>
+    <p v-if="state.message" class="notice notice-success" role="status">
+      {{ state.message }}
+    </p>
+    <ul v-if="state.ignored.length" class="notice notice-muted">
+      <li v-for="item in state.ignored" :key="item">
+        已忽略不支持的要求：{{ item }}
+      </li>
+    </ul>
 
-    <section v-if="preview" class="preview-panel" aria-labelledby="preview-title">
+    <section v-if="preview" ref="previewPanel" class="preview-panel" aria-labelledby="preview-title" tabindex="-1">
       <div class="panel-heading preview-heading">
-        <div><p class="eyebrow" lang="en">REVIEW BEFORE MOVING</p><h2 id="preview-title">检查分类预览</h2></div>
+        <h2 id="preview-title">
+          分类预览
+        </h2>
         <span class="preview-total">{{ preview.counts.total }} 个书签</span>
       </div>
 
@@ -488,9 +561,16 @@ async function confirmImport() {
 
       <div v-if="selected.length" class="selection-bar">
         <span>已选 {{ selected.length }} 条</span>
-        <select class="mini-control" aria-label="批量改派分类" @change="batchAssign(($event.target as HTMLSelectElement).value || null)">
-          <option value="">改为待确认</option>
-          <option v-for="option in allGroups" :key="option.category.id" :value="option.category.id">{{ option.label }}</option>
+        <select class="mini-control" aria-label="批量改派分类" value="__choose__" @change="batchAssign(($event.target as HTMLSelectElement).value || null)">
+          <option value="__choose__" disabled>
+            选择目标分类
+          </option>
+          <option value="">
+            改为待确认
+          </option>
+          <option v-for="option in allGroups" :key="option.category.id" :value="option.category.id">
+            {{ option.label }}
+          </option>
         </select>
       </div>
 
@@ -498,12 +578,16 @@ async function confirmImport() {
         <details v-for="group in groups" :key="group.category.id" :open="group.expanded || !state.filter" class="category-group" :style="{ marginLeft: `${group.depth * 16}px` }">
           <summary>
             <span class="category-summary">
-              <span class="category-marker"></span>
+              <span class="category-marker" />
               <input class="category-name" :value="group.category.name" :aria-label="`分类名称：${group.category.name}`" @click.stop @change="rename(group.category.id, ($event.target as HTMLInputElement).value)">
             </span>
             <span class="category-count">{{ group.rows.length }}</span>
           </summary>
-          <button class="delete-action" type="button" @click="drop(group.category.id)">删除分类及子树，保留书签</button>
+          <details class="category-tools">
+            <summary>分类操作</summary><button class="delete-action" type="button" @click="drop(group.category.id)">
+              移除分类及子树，书签改为待确认
+            </button>
+          </details>
           <ul class="bookmark-list">
             <li v-for="row in group.rows" :key="row.bookmarkId">
               <label><input type="checkbox" :checked="selected.includes(row.bookmarkId)" @change="toggleSelect(row.bookmarkId)"><span>{{ row.title || row.displayUrl }}</span></label>
@@ -512,34 +596,74 @@ async function confirmImport() {
           </ul>
         </details>
         <details v-if="pendingGroup.length" open class="category-group">
-          <summary><span class="category-summary"><span class="category-marker is-pending"></span><span class="category-name">待确认</span></span><span class="category-count">{{ pendingGroup.length }}</span></summary>
-          <ul class="bookmark-list"><li v-for="row in pendingGroup" :key="row.bookmarkId"><label><input type="checkbox" :checked="selected.includes(row.bookmarkId)" @change="toggleSelect(row.bookmarkId)"><span>{{ row.title || row.displayUrl }}</span></label><small :title="row.displayUrl">{{ row.displayUrl }}</small></li></ul>
+          <summary><span class="category-summary"><span class="category-marker is-pending" /><span class="category-name">待确认</span></span><span class="category-count">{{ pendingGroup.length }}</span></summary>
+          <ul class="bookmark-list">
+            <li v-for="row in pendingGroup" :key="row.bookmarkId">
+              <label><input type="checkbox" :checked="selected.includes(row.bookmarkId)" @change="toggleSelect(row.bookmarkId)"><span>{{ row.title || row.displayUrl }}</span></label><small :title="row.displayUrl">{{ row.displayUrl }}</small>
+            </li>
+          </ul>
         </details>
       </div>
 
-      <p v-if="!groups.length && !pendingGroup.length" class="empty-filter">没有符合筛选条件的书签。</p>
-      <div v-if="blocking.length" class="notice notice-error blocking-notice"><p v-for="item in blocking" :key="item">{{ item }}</p></div>
-      <p class="field-help preview-hint">可改名、勾选改派，或删除分类节点。待确认的书签保留原位置。</p>
-      <button class="button-primary execute-button" type="button" :disabled="state.busy || blocking.length > 0" @click="confirmExecute"><span>确认并执行移动</span><span aria-hidden="true">→</span></button>
-    </section>
-
-    <section v-if="state.dropped.length" class="notice notice-muted"><strong>无法分类</strong><ul><li v-for="item in state.dropped" :key="item.id">{{ item.title || item.url }}</li></ul></section>
-
-    <section class="recovery-panel" aria-labelledby="recovery-title">
-      <div class="recovery-copy"><h2 id="recovery-title">最近一次整理</h2><p>{{ state.undoStatus.state === 'available' ? '可撤销最近一次移动，恢复原位置。' : state.undoStatus.state === 'disabled' ? '书签已发生变化，暂不能安全撤销。' : '整理完成后，可在这里撤销移动。' }}</p></div>
-      <button class="button-secondary" type="button" :disabled="state.undoStatus.state !== 'available' || state.busy" @click="runUndo">撤销</button>
-      <ul v-if="state.undoStatus.state === 'disabled'" class="recovery-reasons"><li v-for="reason in state.undoStatus.reasons" :key="reason">{{ reason }}</li></ul>
-      <button v-if="pendingRecovery" class="recovery-link" type="button" :disabled="state.busy" @click="runRecovery">恢复未完成的移动（{{ pendingRecovery.completed.length }} 个）</button>
-    </section>
-
-    <section class="backup-panel" aria-labelledby="backup-title">
-      <div class="panel-heading">
-        <h2 id="backup-title">备份与导入</h2>
-        <span class="section-meta">本地 JSON 文件</span>
+      <div v-if="!groups.length && !pendingGroup.length" class="empty-filter">
+        <p>没有符合筛选条件的书签。</p><button v-if="state.filter" class="text-action" type="button" @click="state.filter = ''">
+          清除筛选
+        </button>
       </div>
-      <p class="field-help">备份「书签栏」与「其他书签」的完整结构。导入只追加节点，不删除、不覆盖现有书签。</p>
+      <div v-if="blocking.length" class="notice notice-error blocking-notice">
+        <p v-for="item in blocking" :key="item">
+          {{ item }}
+        </p>
+      </div>
+      <p class="field-help preview-hint">
+        可改名、勾选改派，或删除分类节点。待确认的书签保留原位置。
+      </p>
+      <button class="button-primary execute-button" type="button" :disabled="state.busy || blocking.length > 0" @click="confirmExecute">
+        <span>{{ state.busy ? '正在移动…' : `确认移动 ${preview.counts.moving} 个书签` }}</span><span aria-hidden="true">→</span>
+      </button>
+    </section>
+
+    <section v-if="state.dropped.length" class="notice notice-muted">
+      <strong>无法分类</strong><ul>
+        <li v-for="item in state.dropped" :key="item.id">
+          {{ item.title || item.url }}
+        </li>
+      </ul>
+    </section>
+
+    <section v-if="state.undoStatus.state !== 'none' || pendingRecovery" class="recovery-panel" aria-labelledby="recovery-title">
+      <div class="recovery-copy">
+        <h2 id="recovery-title">
+          最近一次整理
+        </h2><p>{{ state.undoStatus.state === 'available' ? '可撤销最近一次移动，恢复原位置。' : state.undoStatus.state === 'disabled' ? '书签已发生变化，暂不能安全撤销。' : '整理完成后，可在这里撤销移动。' }}</p>
+      </div>
+      <button class="button-secondary" type="button" :disabled="state.undoStatus.state !== 'available' || state.busy" @click="runUndo">
+        撤销
+      </button>
+      <ul v-if="state.undoStatus.state === 'disabled'" class="recovery-reasons">
+        <li v-for="reason in state.undoStatus.reasons" :key="reason">
+          {{ reason }}
+        </li>
+      </ul>
+      <button v-if="pendingRecovery" class="recovery-link" type="button" :disabled="state.busy" @click="runRecovery">
+        恢复未完成的移动（{{ pendingRecovery.completed.length }} 个）
+      </button>
+    </section>
+
+    <details class="backup-panel" :open="!!pendingImport">
+      <summary class="panel-heading">
+        <h2 id="backup-title">
+          备份与导入
+        </h2>
+        <span class="disclosure-symbol" aria-hidden="true" />
+      </summary>
+      <p class="field-help">
+        备份「书签栏」与「其他书签」的完整结构。导入只追加节点，不删除、不覆盖现有书签。
+      </p>
       <div class="backup-actions">
-        <button class="button-secondary" type="button" :disabled="state.busy" @click="exportBackup">导出备份 <span aria-hidden="true">↓</span></button>
+        <button class="button-secondary" type="button" :disabled="state.busy" @click="exportBackup">
+          导出备份 <span aria-hidden="true">↓</span>
+        </button>
         <label class="button-secondary file-label" :class="{ 'is-disabled': state.busy }">
           选择备份文件 <span aria-hidden="true">↑</span>
           <input type="file" accept=".json,application/json" aria-label="选择备份文件" :disabled="state.busy" @change="pickBackup">
@@ -547,8 +671,12 @@ async function confirmImport() {
       </div>
       <div v-if="pendingImport" class="import-summary">
         <p><strong>{{ pendingImport.name }}</strong>：{{ pendingImport.folders }} 个文件夹、{{ pendingImport.bookmarks }} 个书签</p>
-        <p v-if="pendingImport.other" class="field-help">其中 {{ pendingImport.other }} 个书签不是 HTTP(S)（例如书签小工具），会原样导入。</p>
-        <p class="field-help">将写入：{{ importTargets(pendingImport.data.roots) }}</p>
+        <p v-if="pendingImport.other" class="field-help">
+          其中 {{ pendingImport.other }} 个书签不是 HTTP(S)（例如书签小工具），会原样导入。
+        </p>
+        <p class="field-help">
+          将写入：{{ importTargets(pendingImport.data.roots) }}
+        </p>
         <label v-if="unmatchedRoots.length" class="field-row">
           <span class="field-label">备份中的「{{ unmatchedRoots.map(root => root.title).join('」「') }}」在当前浏览器不存在，改为写入</span>
           <select v-model="state.fallbackRootId" class="text-control">
@@ -556,19 +684,37 @@ async function confirmImport() {
           </select>
         </label>
         <div class="backup-actions">
-          <button class="button-secondary" type="button" :disabled="state.busy" @click="confirmImport">确认导入</button>
-          <button class="text-action" type="button" :disabled="state.busy" @click="pendingImport = null">取消</button>
+          <button class="button-secondary" type="button" :disabled="state.busy" @click="confirmImport">
+            确认导入
+          </button>
+          <button class="text-action" type="button" :disabled="state.busy" @click="pendingImport = null">
+            取消
+          </button>
         </div>
       </div>
-    </section>
+    </details>
     <footer class="workspace-footer">
-      <p><span class="footer-dot" aria-hidden="true"></span> 本机存储 · 由你决定何时发送</p>
+      <p><span class="footer-dot" aria-hidden="true" /> 本机存储 · 由你决定何时发送</p>
       <details class="local-data">
         <summary>本地数据管理</summary>
         <p>仅清除配置、隐私确认与撤销记录，不改动浏览器书签。</p>
-        <button class="delete-action" type="button" :disabled="state.busy" @click="clearLocalData">清除本地配置与撤销记录</button>
+        <button class="delete-action" type="button" :disabled="state.busy" @click="clearDialog?.showModal()">
+          清除本地配置与撤销记录
+        </button>
       </details>
     </footer>
+    <dialog ref="clearDialog" class="clear-dialog" aria-labelledby="clear-title">
+      <h2 id="clear-title">
+        清除本地配置？
+      </h2>
+      <p>将删除 API Key、隐私确认与撤销记录，无法撤销。浏览器书签不会被删除。</p>
+      <div class="dialog-actions">
+        <button class="button-secondary" type="button" autofocus @click="clearDialog?.close()">
+          保留配置
+        </button><button class="button-secondary danger-button" type="button" @click="clearLocalData">
+          清除配置与记录
+        </button>
+      </div>
+    </dialog>
   </main>
 </template>
-

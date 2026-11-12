@@ -40,7 +40,7 @@ export function createModelClient(config: ApiConfig): ModelClient {
         body: JSON.stringify({
           model,
           temperature: 0,
-          response_format: { type: 'json_object' },
+          // response_format: { type: 'json_object' },
           messages,
         }),
       })
