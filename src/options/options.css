@@ -1,0 +1,47 @@
+.settings-shell { max-width: 1040px; margin: 0 auto; padding: 0 40px; }
+.settings-topbar { display: flex; justify-content: space-between; align-items: center; gap: 16px; min-height: 92px; border-bottom: 1px solid var(--line); }
+.brand-home { color: var(--ink); text-decoration: none; }
+.settings-header { padding: 40px 0 32px; }
+.settings-header h1 { margin-top: 8px; font-size: 30px; line-height: 1.5; font-weight: 650; }
+.lede { margin-top: 8px; color: var(--mute); font-size: 13px; }
+.settings-layout { display: grid; grid-template-columns: minmax(0, 1fr) 280px; align-items: start; gap: 64px; padding-bottom: 48px; }
+.settings-main { min-width: 0; }
+.settings-section { padding: 24px 0 28px; border-top: 1px solid var(--line); }
+.section-title { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.section-title h2 { font-size: 15px; font-weight: 650; }
+.section-title > span { color: var(--mute); font-size: 10px; }
+.section-description { margin-top: 5px; color: var(--mute); font-size: 12px; }
+.setting-field { display: block; margin-top: 22px; }
+.key-row { display: flex; gap: 8px; }
+.key-row input { flex: 1; width: 0; }
+.key-row button { flex: 0 0 auto; }
+.endpoint-note { display: flex; gap: 9px; align-items: flex-start; margin-top: 20px; padding: 12px; border-radius: var(--radius-control); background: var(--inset); }
+.endpoint-note .status-dot { margin-top: 7px; }
+.endpoint-note strong { font-size: 11px; font-weight: 600; }
+.endpoint-note p { margin-top: 3px; color: var(--mute); font-size: 11px; overflow-wrap: anywhere; }
+.settings-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 20px; }
+.settings-actions p { flex: 1; min-width: 130px; color: var(--mute); font-size: 10px; }
+.preference-field { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.preference-field input { flex: 0 0 auto; width: 70px; text-align: center; font-variant-numeric: tabular-nums; }
+.preference-field .field-label { margin-bottom: 0; }
+.privacy-aside { padding: 26px 24px; border-radius: var(--radius-panel); background: var(--inset); }
+.privacy-aside .eyebrow { color: var(--accent); font-size: 9px; letter-spacing: .08em; }
+.privacy-aside h2 { margin-top: 14px; font-size: 22px; font-weight: 550; line-height: 1.6; }
+.privacy-aside dl { margin: 24px 0 0; }
+.privacy-aside dl > div + div { margin-top: 22px; }
+.privacy-aside dt { color: var(--accent); font-size: 12px; font-weight: 600; }
+.privacy-aside dd { margin: 6px 0 0; color: var(--body); font-size: 11px; line-height: 1.85; }
+.privacy-footnote { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--mute); font-size: 10px; line-height: 1.8; }
+.settings-footer { display: flex; justify-content: space-between; gap: 12px; padding: 20px 0 30px; border-top: 1px solid var(--line); color: var(--mute); font-size: 10px; }
+@media (max-width: 760px) {
+  .settings-shell { max-width: 580px; padding-inline: 24px; }
+  .settings-topbar { min-height: 80px; }
+  .settings-topbar > .button-ghost-sm { padding-inline: 4px; font-size: 12px; }
+  .settings-header { padding: 30px 0 26px; }
+  .settings-header h1 { font-size: 26px; }
+  .settings-layout { grid-template-columns: minmax(0, 1fr); gap: 8px; padding-bottom: 28px; }
+  .privacy-aside { padding: 22px; }
+  .privacy-aside h2 br { display: none; }
+  .privacy-aside h2 { font-size: 20px; }
+}
+@media (max-width: 359px) { .settings-shell { padding-inline: 16px; } .section-title { gap: 8px; } .section-title > span { font-size: 9px; } .brand-name { font-size: 13px; } }

@@ -382,92 +382,87 @@ async function confirmImport() {
 </script>
 
 <template>
-  <main class="workspace-shell">
+  <a class="skip-link" href="#main-content" target="_self">跳到整理内容</a>
+  <main id="main-content" class="workspace-shell" tabindex="-1">
     <header class="topbar">
       <div class="brand-lockup">
-        <span class="brand-mark" aria-hidden="true">↗</span>
-        <div>
-          <p class="eyebrow">BOOKMARK WORKBENCH</p>
-          <h1>整理台</h1>
-        </div>
+        <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 28" fill="none"><path d="M6 3h12v22l-6-4-6 4V3Z" stroke="currentColor" stroke-width="1.5"/><path d="M9 8h6M9 12h6" stroke="currentColor" stroke-width="1.5"/></svg></span>
+        <div><p class="brand-name">智能书签分类</p><p class="brand-caption" lang="en">Better Bookmark</p></div>
       </div>
-      <button class="button-ghost-sm" type="button" @click="openOptions">设置</button>
+      <button class="button-ghost-sm" type="button" @click="openOptions">模型设置 <span aria-hidden="true">↗</span></button>
     </header>
 
-    <section class="hero-band" aria-labelledby="hero-title">
-      <div class="hero-mesh" aria-hidden="true"></div>
-      <p class="mono-eyebrow">AI BOOKMARK ORGANIZER / 01</p>
-      <h2 id="hero-title">让 AI 先提案，<br><span>你来定稿。</span></h2>
-      <p class="hero-copy">只整理你选中的书签范围。完整预览后才会移动，随时可以修改、恢复或撤销。</p>
-      <nav class="workflow" aria-label="整理流程">
-        <span class="workflow-step is-active"><b>01</b>范围</span>
-        <i aria-hidden="true"></i>
-        <span class="workflow-step"><b>02</b>提案</span>
-        <i aria-hidden="true"></i>
-        <span class="workflow-step"><b>03</b>确认</span>
-      </nav>
-    </section>
+    <div class="workspace-intro">
+      <p class="eyebrow" lang="en">BOOKMARK ORGANIZER</p>
+      <h1>给书签一个好去处。</h1>
+      <p>先预览分类，再决定移动。</p>
+    </div>
+
+    <ol class="workflow" aria-label="整理流程">
+      <li :class="{ 'is-active': !preview && state.undoStatus.state !== 'available' }" :aria-current="!preview && state.undoStatus.state !== 'available' ? 'step' : undefined"><span>1</span>选择范围</li>
+      <li :class="{ 'is-active': !!preview }" :aria-current="preview ? 'step' : undefined"><span>2</span>检查预览</li>
+      <li :class="{ 'is-active': !preview && state.undoStatus.state === 'available' }" :aria-current="!preview && state.undoStatus.state === 'available' ? 'step' : undefined"><span>3</span>确认移动</li>
+    </ol>
 
     <section class="status-strip" :class="resolved.ok ? 'is-ready' : 'is-warning'" aria-live="polite">
       <span class="status-dot" aria-hidden="true"></span>
       <div class="status-copy">
-        <strong>{{ resolved.ok ? '模型服务已就绪' : '还需要完成设置' }}</strong>
+        <strong>{{ resolved.ok ? '模型已配置' : '连接你的模型' }}</strong>
         <p v-if="resolved.ok">{{ config.model }} · {{ resolved.value.origin }}</p>
-        <p v-else>{{ resolved.error }}，前往设置页完成连接。</p>
+        <p v-else>{{ resolved.error }}，完成设置后即可开始。</p>
       </div>
-      <button v-if="resolved.ok" class="button-ghost-sm status-action" type="button" :disabled="state.busy" @click="testConnection">
-        {{ state.testState === 'ok' ? '已连接' : '测试连接' }}
+      <button v-if="!resolved.ok" class="button-ghost-sm status-action" type="button" @click="openOptions">去设置</button>
+      <button v-else class="button-ghost-sm status-action" type="button" :disabled="state.busy" @click="testConnection">
+        {{ state.testState === 'ok' ? '重新测试' : '测试连接' }}
       </button>
     </section>
 
-    <section class="setup-panel surface-panel" aria-labelledby="setup-title">
+    <section class="setup-panel" aria-labelledby="setup-title">
       <div class="panel-heading">
-        <div>
-          <p class="mono-eyebrow">SCOPE / 01</p>
-          <h3 id="setup-title">先告诉我从哪里开始</h3>
-        </div>
-        <span class="panel-index">INPUT</span>
+        <h2 id="setup-title">整理书签</h2>
+        <span class="section-meta">先预览 · 不直接移动</span>
       </div>
 
       <label class="field-row">
-        <span class="field-label">整理范围</span>
-        <select v-model="state.rootId" class="text-control">
+        <span class="field-label">分类范围</span>
+        <select v-model="state.rootId" class="text-control" :disabled="state.busy">
           <option v-for="root in state.roots" :key="root.id" :value="root.id">{{ root.title || root.id }}</option>
         </select>
+        <span class="field-help">包含所选文件夹下的全部书签。</span>
       </label>
 
       <label class="field-row">
         <span class="field-label">整理要求 <small>可选</small></span>
-        <textarea v-model="state.requirement" class="text-control text-area" rows="3" placeholder="例如：按用途分组，用英文命名；留空则跟随书签语言" />
+        <textarea v-model="state.requirement" class="text-control text-area" :disabled="state.busy" rows="2" placeholder="例如：按工作与生活分类，保留英文名称" />
       </label>
 
       <div class="field-row limit-row">
         <div>
           <span class="field-label">分类数量上限</span>
-          <p class="field-help">建议保持在 3–15 个，目录更容易维护。</p>
+          <p class="field-help">每层 3–15 个，最多三层。</p>
         </div>
-        <input v-model.number="config.categoryLimit" class="number-control" type="number" min="3" max="15" aria-label="分类数量上限">
+        <input v-model.number="config.categoryLimit" class="number-control" type="number" min="3" max="15" :disabled="state.busy" aria-label="分类数量上限">
       </div>
 
       <div v-if="consentNeeded" class="privacy-note">
-        <span class="privacy-icon" aria-hidden="true">◎</span>
+        <span class="privacy-icon" aria-hidden="true">◇</span>
         <div>
-          <strong>第一次整理前，请确认隐私边界</strong>
-          <p>只发送书签标题、脱敏 URL 与相对路径。query、凭据和 fragment 永远不会离开浏览器。</p>
+          <strong>发送前，由你授权</strong>
+          <p>仅向你配置的模型发送书签标题、脱敏 URL 与相对路径。不抓取网页正文；query、凭据和 fragment 不会离开浏览器。</p>
           <button class="text-action" type="button" @click="acceptConsent">我已了解并同意</button>
         </div>
       </div>
 
       <div class="primary-actions">
-        <button class="button-primary" type="button" :disabled="state.busy || consentNeeded" @click="classify">
-          <span>{{ state.busy ? '正在整理' : '生成分类提案' }}</span><span aria-hidden="true">→</span>
+        <button class="button-primary" type="button" :disabled="state.busy || consentNeeded || !resolved.ok" @click="classify">
+          <span>{{ state.busy ? '正在处理' : '生成分类预览' }}</span><span aria-hidden="true">→</span>
         </button>
         <button v-if="state.busy" class="button-secondary" type="button" @click="orchestrator.cancel()">取消</button>
       </div>
 
       <div v-if="state.progress" class="progress-block" aria-live="polite">
-        <div class="progress-meta"><span>{{ state.progress.stage }}</span><strong>{{ state.progress.done }}/{{ state.progress.total }}</strong></div>
-        <div class="progress-track"><span :style="{ width: `${state.progress.total ? Math.round(state.progress.done / state.progress.total * 100) : 0}%` }"></span></div>
+        <div class="progress-meta"><span>{{ { summarize: '读取书签信息', plan: '生成分类方案', classify: '逐项分类' }[state.progress.stage] }}</span><strong>{{ state.progress.done }}/{{ state.progress.total }}</strong></div>
+        <progress class="progress-track" :value="state.progress.done" :max="state.progress.total || 1" aria-label="分类进度"></progress>
         <p v-if="state.progress.message">{{ state.progress.message }}</p>
       </div>
     </section>
@@ -477,10 +472,10 @@ async function confirmImport() {
     <p v-if="state.message" class="notice notice-success" role="status">{{ state.message }}</p>
     <ul v-if="state.ignored.length" class="notice notice-muted"><li v-for="item in state.ignored" :key="item">已忽略不支持的要求：{{ item }}</li></ul>
 
-    <section v-if="preview" class="preview-panel surface-panel" aria-labelledby="preview-title">
+    <section v-if="preview" class="preview-panel" aria-labelledby="preview-title">
       <div class="panel-heading preview-heading">
-        <div><p class="mono-eyebrow">PROPOSAL / 02</p><h3 id="preview-title">分类提案</h3></div>
-        <span class="preview-total">{{ preview.counts.total }} 条</span>
+        <div><p class="eyebrow" lang="en">REVIEW BEFORE MOVING</p><h2 id="preview-title">检查分类预览</h2></div>
+        <span class="preview-total">{{ preview.counts.total }} 个书签</span>
       </div>
 
       <div class="metric-grid">
@@ -522,31 +517,32 @@ async function confirmImport() {
         </details>
       </div>
 
+      <p v-if="!groups.length && !pendingGroup.length" class="empty-filter">没有符合筛选条件的书签。</p>
       <div v-if="blocking.length" class="notice notice-error blocking-notice"><p v-for="item in blocking" :key="item">{{ item }}</p></div>
+      <p class="field-help preview-hint">可改名、勾选改派，或删除分类节点。待确认的书签保留原位置。</p>
       <button class="button-primary execute-button" type="button" :disabled="state.busy || blocking.length > 0" @click="confirmExecute"><span>确认并执行移动</span><span aria-hidden="true">→</span></button>
     </section>
 
     <section v-if="state.dropped.length" class="notice notice-muted"><strong>无法分类</strong><ul><li v-for="item in state.dropped" :key="item.id">{{ item.title || item.url }}</li></ul></section>
 
-    <section class="recovery-panel surface-panel">
-      <div class="recovery-copy"><p class="mono-eyebrow">RECOVERY / 03</p><h3>最近一次整理</h3><p>{{ state.undoStatus.state === 'available' ? '可以撤销最近一次移动。' : state.undoStatus.state === 'disabled' ? '撤销已被保护性禁用。' : '完成一次整理后，这里会保留撤销入口。' }}</p></div>
+    <section class="recovery-panel" aria-labelledby="recovery-title">
+      <div class="recovery-copy"><h2 id="recovery-title">最近一次整理</h2><p>{{ state.undoStatus.state === 'available' ? '可撤销最近一次移动，恢复原位置。' : state.undoStatus.state === 'disabled' ? '书签已发生变化，暂不能安全撤销。' : '整理完成后，可在这里撤销移动。' }}</p></div>
       <button class="button-secondary" type="button" :disabled="state.undoStatus.state !== 'available' || state.busy" @click="runUndo">撤销</button>
       <ul v-if="state.undoStatus.state === 'disabled'" class="recovery-reasons"><li v-for="reason in state.undoStatus.reasons" :key="reason">{{ reason }}</li></ul>
       <button v-if="pendingRecovery" class="recovery-link" type="button" :disabled="state.busy" @click="runRecovery">恢复未完成的移动（{{ pendingRecovery.completed.length }} 个）</button>
-      <button class="recovery-link muted-link" type="button" @click="clearLocalData">清除本地配置与撤销记录</button>
     </section>
 
-    <section class="backup-panel surface-panel" aria-labelledby="backup-title">
+    <section class="backup-panel" aria-labelledby="backup-title">
       <div class="panel-heading">
-        <div><p class="mono-eyebrow">BACKUP / 04</p><h3 id="backup-title">备份与导入</h3></div>
-        <span class="panel-index">JSON</span>
+        <h2 id="backup-title">备份与导入</h2>
+        <span class="section-meta">本地 JSON 文件</span>
       </div>
-      <p class="field-help">导出「书签栏」与「其他书签」的完整结构。导入只创建节点，追加在同名根目录末尾，不删除现有书签。</p>
+      <p class="field-help">备份「书签栏」与「其他书签」的完整结构。导入只追加节点，不删除、不覆盖现有书签。</p>
       <div class="backup-actions">
-        <button class="button-secondary" type="button" :disabled="state.busy" @click="exportBackup">导出备份</button>
+        <button class="button-secondary" type="button" :disabled="state.busy" @click="exportBackup">导出备份 <span aria-hidden="true">↓</span></button>
         <label class="button-secondary file-label" :class="{ 'is-disabled': state.busy }">
-          选择备份文件
-          <input type="file" accept=".json,application/json" hidden @change="pickBackup">
+          选择备份文件 <span aria-hidden="true">↑</span>
+          <input type="file" accept=".json,application/json" aria-label="选择备份文件" :disabled="state.busy" @change="pickBackup">
         </label>
       </div>
       <div v-if="pendingImport" class="import-summary">
@@ -565,131 +561,14 @@ async function confirmImport() {
         </div>
       </div>
     </section>
+    <footer class="workspace-footer">
+      <p><span class="footer-dot" aria-hidden="true"></span> 本机存储 · 由你决定何时发送</p>
+      <details class="local-data">
+        <summary>本地数据管理</summary>
+        <p>仅清除配置、隐私确认与撤销记录，不改动浏览器书签。</p>
+        <button class="delete-action" type="button" :disabled="state.busy" @click="clearLocalData">清除本地配置与撤销记录</button>
+      </details>
+    </footer>
   </main>
 </template>
 
-<style>
-:root { color-scheme: light; --ink: #171717; --body: #4d4d4d; --mute: #8f8f8f; --faint: #a1a1a1; --hairline: #ebebeb; --hairline-soft: #f2f2f2; --canvas: #fafafa; --surface: #fff; --link: #0070f3; --error: #ee0000; --success: #0070f3; }
-* { box-sizing: border-box; }
-html, body { min-width: 320px; margin: 0; background: var(--canvas); color: var(--ink); font-family: Geist, Inter, Arial, "PingFang SC", "Microsoft YaHei", sans-serif; }
-body { font-size: 14px; }
-button, input, select, textarea { font: inherit; }
-button { cursor: pointer; }
-button:disabled { cursor: not-allowed; opacity: .48; }
-button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
-.workspace-shell { max-width: 620px; margin: 0 auto; padding: 16px 16px 40px; }
-.topbar, .brand-lockup, .panel-heading, .workflow, .status-strip, .primary-actions, .progress-meta, .selection-bar, .recovery-panel { display: flex; align-items: center; }
-.topbar { justify-content: space-between; margin-bottom: 8px; }
-.brand-lockup { gap: 9px; }
-.brand-mark { display: grid; width: 28px; height: 28px; place-items: center; border: 1px solid var(--ink); border-radius: 50%; font-size: 16px; line-height: 1; }
-.eyebrow, .mono-eyebrow { margin: 0; font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; font-weight: 500; letter-spacing: .02em; }
-.eyebrow { color: var(--mute); }
-.topbar h1 { margin: 2px 0 0; font-size: 16px; font-weight: 600; letter-spacing: -.02em; }
-.button-ghost-sm, .button-secondary { border: 1px solid var(--hairline); border-radius: 6px; background: var(--surface); color: var(--ink); font-size: 14px; font-weight: 500; }
-.button-ghost-sm { min-height: 32px; padding: 0 10px; }
-.hero-band { position: relative; overflow: hidden; margin: 0 -16px; padding: 48px 16px 28px; border-bottom: 1px solid var(--hairline); }
-.hero-mesh { position: absolute; inset: 0; pointer-events: none; opacity: .35; background: radial-gradient(circle at 86% 14%, #00dfd8 0, transparent 30%), radial-gradient(circle at 72% 52%, #7928ca 0, transparent 36%), radial-gradient(circle at 98% 96%, #ff0080 0, transparent 27%), radial-gradient(circle at 14% 94%, #f9cb28 0, transparent 24%); filter: blur(30px); }
-.hero-band > *:not(.hero-mesh) { position: relative; }
-.hero-band .mono-eyebrow { color: var(--body); }
-.hero-band h2 { max-width: 520px; margin: 12px 0 16px; font-size: clamp(38px, 10vw, 56px); font-weight: 600; line-height: 1.05; letter-spacing: -2.7px; text-wrap: balance; }
-.hero-band h2 span { background: linear-gradient(90deg, #007cf0, #7928ca 50%, #ff0080); -webkit-background-clip: text; background-clip: text; color: transparent; }
-.hero-copy { max-width: 420px; margin: 0; color: var(--body); font-size: 15px; line-height: 1.65; }
-.workflow { gap: 10px; margin-top: 30px; color: var(--mute); font-size: 12px; }
-.workflow-step { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
-.workflow-step b { color: var(--ink); font-family: "Geist Mono", ui-monospace, monospace; font-size: 11px; font-weight: 500; }
-.workflow-step.is-active { color: var(--ink); font-weight: 600; }
-.workflow i { flex: 1; height: 1px; background: var(--hairline); }
-.status-strip { gap: 10px; margin-top: 16px; padding: 12px; border: 1px solid var(--hairline); background: var(--surface); }
-.status-dot { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: var(--error); }
-.is-ready .status-dot { background: var(--success); }
-.status-copy { min-width: 0; flex: 1; }
-.status-copy strong, .status-copy p { display: block; }
-.status-copy strong { font-size: 13px; font-weight: 600; }
-.status-copy p { margin: 3px 0 0; overflow: hidden; color: var(--mute); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.status-action { flex: 0 0 auto; }
-.surface-panel { border: 1px solid var(--hairline); background: var(--surface); }
-.setup-panel, .preview-panel { margin-top: 16px; padding: 20px; }
-.panel-heading { justify-content: space-between; align-items: flex-start; margin-bottom: 22px; }
-.panel-heading h3, .recovery-panel h3, .backup-panel h3 { margin: 5px 0 0; font-size: 20px; font-weight: 600; letter-spacing: -.5px; }
-.mono-eyebrow, .panel-index, .preview-total { color: var(--mute); }
-.panel-index, .preview-total { font-family: "Geist Mono", ui-monospace, monospace; font-size: 11px; }
-.field-row { display: block; margin-top: 18px; }
-.field-label { display: block; margin-bottom: 8px; font-size: 14px; font-weight: 500; }
-.field-label small { color: var(--mute); font-size: 12px; font-weight: 400; }
-.text-control, .number-control, .mini-control { width: 100%; border: 1px solid var(--hairline); border-radius: 6px; outline: 0; background: var(--surface); color: var(--ink); }
-.text-control { padding: 10px 12px; font-size: 14px; transition: border-color .16s, box-shadow .16s; }
-.text-control:focus, .number-control:focus, .mini-control:focus { border-color: var(--link); box-shadow: 0 0 0 3px rgba(0,112,243,.12); }
-.text-area { min-height: 82px; resize: vertical; line-height: 1.55; }
-.limit-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-.field-help { margin: -2px 0 0; color: var(--mute); font-size: 12px; line-height: 1.5; }
-.number-control { width: 72px; padding: 9px 8px; text-align: center; }
-.privacy-note { display: flex; gap: 12px; margin-top: 20px; padding: 14px; border: 1px solid var(--hairline); background: var(--hairline-soft); }
-.privacy-icon { color: var(--link); font-size: 18px; }
-.privacy-note strong { font-size: 13px; font-weight: 600; }
-.privacy-note p { margin: 5px 0 8px; color: var(--body); font-size: 12px; line-height: 1.55; }
-.text-action, .recovery-link, .delete-action { padding: 0; border: 0; background: none; color: var(--link-deep, #0761d1); font-size: 12px; }
-.text-action { font-weight: 500; }
-.primary-actions { gap: 8px; margin-top: 24px; }
-.button-primary, .button-secondary { min-height: 42px; font-size: 14px; font-weight: 500; transition: background .16s, border-color .16s, transform .16s; }
-.button-primary { display: flex; flex: 1; align-items: center; justify-content: space-between; padding: 0 14px; border: 1px solid var(--ink); border-radius: 100px; background: var(--ink); color: #fff; }
-.button-primary:hover:not(:disabled) { background: #333; }
-.button-primary:active:not(:disabled) { transform: translateY(1px); }
-.button-secondary { padding: 0 14px; }
-.progress-block { margin-top: 18px; }
-.progress-meta { justify-content: space-between; color: var(--mute); font-size: 12px; }
-.progress-meta strong { color: var(--ink); font-family: "Geist Mono", ui-monospace, monospace; font-weight: 500; }
-.progress-track { height: 3px; margin-top: 9px; background: var(--hairline-soft); }
-.progress-track span { display: block; height: 100%; background: linear-gradient(90deg, #007cf0, #7928ca, #ff0080); transition: width .25s ease; }
-.progress-block p { margin: 8px 0 0; color: var(--mute); font-size: 12px; }
-.notice { margin: 12px 0 0; padding: 11px 13px; border: 1px solid var(--hairline); font-size: 13px; line-height: 1.55; }
-.notice-success { border-color: #b9d9ff; background: #f1f7ff; color: #0756ae; }
-.notice-error { border-color: #ffcaca; background: #fff5f5; color: #a50000; }
-.notice-muted { background: var(--hairline-soft); color: var(--body); }
-.notice ul { margin: 6px 0 0; padding-left: 17px; }
-.preview-panel { margin-top: 24px; }
-.preview-heading { margin-bottom: 18px; }
-.metric-grid { display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid var(--hairline); border-bottom: 1px solid var(--hairline); }
-.metric-grid div { padding: 12px 8px; border-right: 1px solid var(--hairline); }
-.metric-grid div:last-child { border-right: 0; }
-.metric-grid strong, .metric-grid span { display: block; }
-.metric-grid strong { font-family: "Geist Mono", ui-monospace, monospace; font-size: 20px; font-weight: 500; }
-.metric-grid span { margin-top: 3px; color: var(--mute); font-size: 11px; }
-.search-control { margin-top: 16px; }
-.selection-bar { justify-content: space-between; gap: 8px; margin-top: 10px; color: var(--mute); font-size: 12px; }
-.mini-control { width: auto; padding: 7px 9px; font-size: 12px; }
-.category-list { margin-top: 14px; }
-.category-group { border-bottom: 1px solid var(--hairline); }
-.category-group summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 0; cursor: pointer; list-style: none; }
-.category-group summary::-webkit-details-marker { display: none; }
-.category-summary { display: flex; min-width: 0; align-items: center; gap: 9px; }
-.category-marker { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: var(--link); }
-.category-marker.is-pending { background: var(--mute); }
-.category-name { min-width: 0; border: 0; outline: 0; background: transparent; color: var(--ink); font-size: 14px; font-weight: 600; }
-.category-count { color: var(--mute); font-family: "Geist Mono", ui-monospace, monospace; font-size: 11px; }
-.delete-action { display: block; padding: 0 0 8px 16px; color: var(--error); }
-.bookmark-list { margin: 0; padding: 0 0 10px 16px; list-style: none; }
-.bookmark-list li { padding: 8px 0; }
-.bookmark-list label { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; line-height: 1.45; }
-.bookmark-list input { margin: 3px 0 0; accent-color: var(--link); }
-.bookmark-list label span { overflow-wrap: anywhere; }
-.bookmark-list small { display: block; overflow: hidden; margin: 3px 0 0 22px; color: var(--mute); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.blocking-notice { margin-top: 14px; }
-.blocking-notice p { margin: 0; }
-.execute-button { width: 100%; margin-top: 16px; }
-.recovery-panel { display: grid; grid-template-columns: 1fr auto; gap: 14px; margin-top: 16px; padding: 18px 20px; }
-.recovery-copy p:last-child { margin: 6px 0 0; color: var(--mute); font-size: 12px; line-height: 1.55; }
-.recovery-reasons, .recovery-link { grid-column: 1 / -1; }
-.recovery-reasons { margin: 0; padding-left: 17px; color: var(--body); font-size: 12px; }
-.recovery-link { text-align: left; }
-.muted-link { color: var(--mute); }
-.backup-panel { margin-top: 16px; padding: 18px 20px; }
-.backup-actions { display: flex; align-items: center; gap: 8px; margin-top: 14px; }
-.file-label { display: inline-flex; align-items: center; cursor: pointer; }
-.file-label.is-disabled { pointer-events: none; opacity: .48; }
-.import-summary { margin-top: 14px; padding: 12px 14px; border: 1px solid var(--hairline); background: var(--hairline-soft); }
-.import-summary p { margin: 0; font-size: 13px; }
-.import-summary .backup-actions { margin-top: 10px; }
-@media (min-width: 640px) { .workspace-shell { padding: 22px 24px 48px; } .hero-band { margin: 0 -24px; padding-right: 24px; padding-left: 24px; } }
-@media (max-width: 420px) { .metric-grid span { font-size: 10px; } .metric-grid div { padding-right: 5px; padding-left: 5px; } }
-@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; } }
-</style>
