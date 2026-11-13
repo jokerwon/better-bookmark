@@ -86,8 +86,23 @@ export function createOrchestrator(tree: BookmarkTree, hooks: OrchestratorHooks 
           count,
         ))),
       )
-      const planned = await ask(planPrompt(snapshot.effectiveLimit, summaries, params.requirement), 'plan', 1, 1)
-      const categories = toCategories(parsePlan(extractJson(planned)), snapshot.effectiveLimit)
+      // 模型常把“每层上限”理解成“每个父节点上限”；被拒后带原因重试一次，仍不合规就失败。
+      let categories: Category[]
+      let correction = ''
+      for (let attempt = 0; ; attempt++) {
+        try {
+          categories = toCategories(
+            parsePlan(extractJson(await ask(planPrompt(snapshot.effectiveLimit, summaries, params.requirement, correction), 'plan', 1, 1))),
+            snapshot.effectiveLimit,
+          )
+          break
+        }
+        catch (error) {
+          if (!(error instanceof OperationError) || !error.blocked || attempt > 0) // 取消（blocked=false）不重试
+            throw error
+          correction = `上一次方案被拒绝：${error.message}。请重新输出完整方案，严格按整层合计控制每层节点总数。`
+        }
+      }
       const categoryOptions = flattenCategories(categories).map(category => ({ id: category.id, name: category.name, parent_id: category.parentId }))
 
       const batches = chunk(snapshot.bookmarks, BATCH_SIZE)

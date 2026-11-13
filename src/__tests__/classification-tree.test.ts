@@ -161,6 +161,32 @@ describe('分类树协议', () => {
     }
   })
 
+  it('超出整层上限的方案会带拒绝原因重试一次', async () => {
+    const { memory, root } = nestedFixture()
+    const overLimit = [{ name: '一' }, { name: '二' }, { name: '三' }, { name: '四' }]
+    const plans: string[] = []
+    let planCalls = 0
+    const model: ModelClient = {
+      async complete(messages: ChatMessage[]) {
+        const prompt = messages[0].content
+        if (prompt.includes('"summary"'))
+          return JSON.stringify({ summary: '摘要' })
+        if (prompt.includes('归并主题')) {
+          plans.push(prompt)
+          return JSON.stringify({ categories: planCalls++ === 0 ? overLimit : [{ name: '工作', children: [{ name: '开发' }] }] })
+        }
+        const batch = prompt.slice(prompt.indexOf('本批书签'))
+        const ids = [...batch.matchAll(/"id":"([^"]+)"/g)].map(match => match[1])
+        return JSON.stringify({ decisions: ids.map(bookmarkId => ({ bookmark_id: bookmarkId, decision: 'assign', category_id: 'c2' })) })
+      },
+    }
+    const orchestrator = createOrchestrator(memory.createTree())
+    const run = await orchestrator.classify({ rootId: root, categoryLimit: 3, requirement: '' }, model)
+    expect(plans).toHaveLength(2)
+    expect(plans[1]).toContain('第 1 层分类超过上限 3')
+    expect(run.preview.counts.categories).toBe(2)
+  })
+
   it('上限按层累计，而不是整棵树的总量', async () => {
     const { memory, root } = nestedFixture()
     const orchestrator = createOrchestrator(memory.createTree())
