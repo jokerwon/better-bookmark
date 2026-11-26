@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import PagekeepBrand from '~/PagekeepBrand.vue'
 import { CATEGORY_LIMIT_DEFAULT, CATEGORY_LIMIT_MAX, CATEGORY_LIMIT_MIN, clampCategoryLimit, resolveConfig } from '~/core/config'
 import { CONNECTION_TEST_MESSAGES, ModelError, createModelClient } from '~/core/model'
 import { ensureHostPermission } from '~/core/permissions'
@@ -25,19 +26,21 @@ async function testConnection() {
     return
   testing.value = true
   message.value = ''
+  const currentConfig = { ...config.value }
+  const target = resolveConfig(currentConfig)
   try {
-    if (!resolved.value.ok) {
+    if (!target.ok) {
       messageKind.value = 'fail'
-      message.value = resolved.value.error
+      message.value = target.error
       return
     }
-    if (!(await ensureHostPermission(resolved.value.value.origin))) {
+    if (!(await ensureHostPermission(target.value.origin))) {
       messageKind.value = 'fail'
       message.value = '未授予该模型源的访问权限'
       return
     }
     // 固定测试消息：不含任何书签数据。
-    await createModelClient({ ...config.value }).complete([...CONNECTION_TEST_MESSAGES])
+    await createModelClient(currentConfig).complete([...CONNECTION_TEST_MESSAGES])
     messageKind.value = 'ok'
     message.value = '连接成功'
   }
@@ -61,20 +64,16 @@ function normalizeLimit() {
   <a class="skip-link" href="#main-content" target="_self">跳到模型设置</a>
   <div class="settings-shell">
     <header class="settings-topbar">
-      <a class="brand-lockup brand-home" href="../sidepanel/index.html" target="_self" aria-label="返回书签整理">
-        <div><p class="brand-name" lang="en">BETTER<br>BOOKMARK.</p><p class="brand-caption">智能书签分类</p></div>
-      </a>
-      <a class="button-ghost-sm" href="../sidepanel/index.html" target="_self">返回整理 <span aria-hidden="true">↗</span></a>
+      <PagekeepBrand caption="SETTINGS" />
+      <a class="button-secondary" href="../sidepanel/index.html" target="_self">返回书架 <span aria-hidden="true">↗</span></a>
     </header>
 
     <main id="main-content" tabindex="-1">
       <header class="settings-header">
-        <h1>连接。</h1>
-        <div>
-          <h2>模型设置</h2><p class="lede">
-            用你信任的模型整理书签。<br>配置在本机自动保存。
-          </p>
-        </div>
+        <h1>模型设置</h1>
+        <p class="lede">
+          用你信任的模型整理书签。配置在本机自动保存。
+        </p>
       </header>
 
       <div class="settings-layout">
@@ -123,7 +122,7 @@ function normalizeLimit() {
 
         <aside class="privacy-aside" aria-labelledby="privacy-title">
           <h2 id="privacy-title">
-            你的数据。<br>你的决定。
+            书签与隐私
           </h2>
           <dl>
             <div><dt>保存在本机</dt><dd>API Key、配置、隐私确认与撤销记录只存于本机扩展存储，不同步、不上报。</dd></div>
@@ -137,7 +136,7 @@ function normalizeLimit() {
       </div>
     </main>
     <footer class="settings-footer">
-      <span lang="en">Better Bookmark</span><span>本机配置 · 按需授权</span>
+      <span>拾页</span><span>本机配置 · 按需授权</span>
     </footer>
   </div>
 </template>

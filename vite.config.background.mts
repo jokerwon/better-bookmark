@@ -11,11 +11,6 @@ const isDev = process.env.NODE_ENV !== 'production'
 
 export default defineConfig({
   ...sharedConfig,
-  define: {
-    '__DEV__': isDev,
-    '__NAME__': JSON.stringify(packageJson.name),
-    'process.env.NODE_ENV': JSON.stringify(isDev ? 'development' : 'production'),
-  },
   build: {
     outDir: r('extension/dist/background'),
     emptyOutDir: false,

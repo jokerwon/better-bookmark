@@ -22,14 +22,14 @@ export const OPTIONAL_HOST_PERMISSIONS = ['http://*/*', 'https://*/*']
 export function defineManifest(): { manifest: Manifest.WebExtensionManifest, dist: typeof dist } {
   const manifest: Manifest.WebExtensionManifest = {
     manifest_version: 3,
-    name: '智能书签分类',
+    name: '拾页 · 主题书架',
     version: '0.1.0',
-    description: '用你自己的 OpenAI-compatible 模型把浏览器书签整理成一级分类，先预览再执行，可撤销。',
+    description: '浏览和搜索本机书签。用自己的模型生成分类预览，确认后移动，最近一次整理可撤销。',
     icons: ICON_PATHS,
     permissions: PERMISSIONS,
     optional_host_permissions: OPTIONAL_HOST_PERMISSIONS,
     action: {
-      default_title: '智能书签分类',
+      default_title: '拾页 · 主题书架',
     },
     background: {
       service_worker: dist.background,

@@ -4,8 +4,6 @@ import { fileURLToPath } from 'node:url'
 import type { UserConfig } from 'vite'
 import { defineConfig } from 'vitest/config'
 import Vue from '@vitejs/plugin-vue'
-import UnoCSS from 'unocss/vite'
-import packageJson from './package.json'
 
 const root = dirname(fileURLToPath(import.meta.url))
 export const r = (...segments: string[]) => resolve(root, ...segments)
@@ -19,32 +17,7 @@ export const sharedConfig: UserConfig = {
       '~/': `${r('src')}/`,
     },
   },
-  define: {
-    __DEV__: isDev,
-    __NAME__: JSON.stringify(packageJson.name),
-  },
-  plugins: [
-    Vue(),
-    UnoCSS(),
-    // 构建产物使用相对路径，扩展页面才能正确加载 assets。
-    {
-      name: 'assets-rewrite',
-      enforce: 'post',
-      apply: 'build',
-      transformIndexHtml(html, { path }) {
-        const relative = (from: string, to: string) => {
-          const fromParts = dirname(from).split('/').filter(Boolean)
-          const toParts = to.split('/').filter(Boolean)
-          while (fromParts.length && fromParts[0] === toParts[0]) {
-            fromParts.shift()
-            toParts.shift()
-          }
-          return [...fromParts.map(() => '..'), ...toParts].join('/') || '.'
-        }
-        return html.replace(/"\/assets\//g, `"${relative(path, '/assets')}/`)
-      },
-    },
-  ],
+  plugins: [Vue()],
   build: {
     outDir: r('extension/dist'),
     emptyOutDir: false,
@@ -60,7 +33,7 @@ export const sharedConfig: UserConfig = {
 
 export default defineConfig({
   ...sharedConfig,
-  base: '/dist/',
+  base: './',
   test: {
     globals: true,
     environment: 'node',

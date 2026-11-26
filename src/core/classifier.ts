@@ -16,6 +16,13 @@ export class OperationError extends Error {
   }
 }
 
+export class StalePreviewError extends OperationError {
+  constructor() {
+    super('书签在预览后发生了变化，请重新生成预览', true)
+    this.name = 'StalePreviewError'
+  }
+}
+
 export interface RunParams {
   rootId: string
   categoryLimit: number
@@ -135,7 +142,7 @@ export function createOrchestrator(tree: BookmarkTree, hooks: OrchestratorHooks 
 
   async function execute(preview: Preview): Promise<OperationResult> {
     if (!sameFingerprint(preview.fingerprint, await tree.liveFingerprint(preview.rootId)))
-      throw new OperationError('书签在预览后发生了变化，请重新生成预览', true)
+      throw new StalePreviewError()
 
     const base = {
       unchanged: preview.counts.unchanged,

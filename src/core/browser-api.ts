@@ -2,15 +2,13 @@ import type Browser from 'webextension-polyfill'
 
 export type ExtensionApi = typeof Browser
 
-/**
- * 扩展 API 引用：延迟到首次属性访问时才解析全局 browser，
- * 这样模块加载顺序与测试替身都不影响使用。
- */
+/** Chrome/Edge MV3 提供 Promise API；按需访问以便领域模块在非扩展环境中导入。 */
 export const browserApi = new Proxy({} as ExtensionApi, {
-  get: (_target, property: string) => {
-    const api = (globalThis as unknown as { browser?: ExtensionApi }).browser
+  get: (_target, property: keyof ExtensionApi) => {
+    const { browser, chrome } = globalThis as unknown as { browser?: ExtensionApi, chrome?: ExtensionApi }
+    const api = chrome ?? browser
     if (!api)
-      throw new Error('扩展 API 不可用：缺少全局 browser')
-    return (api as unknown as Record<string, unknown>)[property]
+      throw new Error('当前页面无法访问浏览器扩展 API')
+    return api[property]
   },
 })

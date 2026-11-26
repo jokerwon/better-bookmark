@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { recover } from '../core/lifecycle'
 import type { ChatMessage, ModelClient } from '../core/types'
 import { MemoryTree } from './memory-tree'
-import { createOrchestrator } from '~/core/classifier'
+import { StalePreviewError, createOrchestrator } from '~/core/classifier'
 
 /** 确定性模型客户端：按提示内容分派固定答案，并记录收到的请求。 */
 class ScriptedModel implements ModelClient {
@@ -125,7 +125,7 @@ describe('端到端分类工作流', () => {
     const run = await classifyWith(model, memory, root)
     memory.external({ id: 'b2', title: '改名了' })
     const orchestrator = createOrchestrator(memory.createTree())
-    await expect(orchestrator.execute(run.preview)).rejects.toThrow('书签在预览后发生了变化')
+    await expect(orchestrator.execute(run.preview)).rejects.toBeInstanceOf(StalePreviewError)
   })
 
   it('移动失败时停止后续移动并可恢复', async () => {

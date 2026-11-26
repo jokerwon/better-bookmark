@@ -1,9 +1,9 @@
 {
   "name": "better-bookmark",
-  "displayName": "智能书签分类",
+  "displayName": "拾页 · 主题书架",
   "version": "0.1.0",
   "private": true,
-  "description": "AI 书签智能分类浏览器扩展",
+  "description": "本地浏览、搜索与智能分类浏览器书签",
   "scripts": {
     "dev": "npm run build:manifest && vite build --watch",
     "build": "npm run clean && npm run build:manifest && vite build && npm run build:background",
@@ -20,7 +20,6 @@
     "@types/node": "^22.5.0",
     "@types/webextension-polyfill": "^0.12.0",
     "@typescript-eslint/eslint-plugin": "^8.2.0",
-    "@unocss/reset": "^0.62.2",
     "@vitejs/plugin-vue": "^5.1.2",
     "@vue/test-utils": "^2.4.6",
     "@vueuse/core": "^11.0.1",
@@ -32,7 +31,6 @@
     "kolorist": "^1.8.0",
     "rimraf": "^6.0.1",
     "typescript": "^5.5.4",
-    "unocss": "^0.62.2",
     "vite": "^5.4.2",
     "vitest": "^2.0.5",
     "vue": "^3.4.38",
